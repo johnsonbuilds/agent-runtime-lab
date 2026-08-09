@@ -30,8 +30,7 @@
 需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)。
 
 ```bash
-uv venv .venv
-uv pip install --python .venv/bin/python -r requirements.txt
+uv sync
 ```
 
 复制环境变量模板并填写自己的配置：
@@ -43,7 +42,7 @@ cp .env.example .env
 然后运行：
 
 ```bash
-.venv/bin/python run_agent.py "北京今天天气怎么样？"
+uv run python run_agent.py "北京今天天气怎么样？"
 ```
 
 ## 环境变量
