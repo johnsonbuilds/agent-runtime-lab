@@ -4,8 +4,9 @@ import sys
 
 from dotenv import load_dotenv
 
-from agent_loop import run_agent_loop, tool_registry
-from llm import OpenAICompatibleLLM
+from agent_practice.agent.loop import run_agent_loop
+from agent_practice.providers.llm import OpenAICompatibleLLM
+from agent_practice.tools.tools import create_default_registry
 
 
 def main() -> None:
@@ -17,8 +18,8 @@ def main() -> None:
         raise SystemExit("问题不能为空")
 
     llm = OpenAICompatibleLLM()
-    answer = run_agent_loop(prompt, llm, tool_registry)
-    print(answer)
+    tools = create_default_registry()
+    print(run_agent_loop(prompt, llm, tools))
 
 
 if __name__ == "__main__":

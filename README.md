@@ -18,13 +18,12 @@
 4. LLM 根据工具结果生成最终回答。
 5. 通过最大迭代次数避免模型陷入无限工具调用。
 
-相关文件：
+相关目录：
 
-- `agent_loop.py`：Agent 状态循环、工具 schema 和工具执行。
-- `mock_llm.py`：OpenAI 兼容接口的 `AsyncOpenAI` 适配器。
-- `run_agent.py`：从命令行调用真实模型。
-- `tools.py`：最小工具注册表示例。
-- `test_run.py`：Agent Loop 的基础验收测试。
+- `agent_practice/agent/`：Agent loop，只依赖模型和工具接口，不包含具体实现。
+- `agent_practice/tools/`：工具注册、schema 和内置工具示例。
+- `agent_practice/providers/`：模型供应商适配，目前包含 OpenAI 兼容接口。
+- `run_agent.py`：组装模型、工具和 loop，并提供命令行入口。
 
 ## 快速开始
 
@@ -45,12 +44,6 @@ cp .env.example .env
 
 ```bash
 .venv/bin/python run_agent.py "北京今天天气怎么样？"
-```
-
-也可以直接运行基础测试：
-
-```bash
-.venv/bin/python test_run.py
 ```
 
 ## 环境变量
@@ -80,6 +73,17 @@ OPENAI_MODEL=your-model
 - MCP 等外部工具协议
 
 每个实验都会保持较小的代码规模，并配套可运行示例和测试。
+
+## 模块化约定
+
+第一阶段只保留三个模块目录，先按职责分组，不追求过早拆分：
+
+1. `agent` 解决“如何循环调用模型和工具”。
+2. `tools` 解决“有哪些工具以及如何注册和执行”。
+3. `providers` 解决“如何连接不同模型服务商”。
+
+后续只有当一个主题出现独立的实现和示例时，才新增目录，例如
+`memory/`、`planning/`、`observability/`。具体组合统一放在 `run_agent.py` 或新的示例入口中，核心模块不直接写死业务选择。
 
 ## 参与贡献
 
