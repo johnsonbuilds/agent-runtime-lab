@@ -1,5 +1,5 @@
 [project]
-name = "agent-loop-practice"
+name = "agent-runtime-lab"
 version = "0.1.0"
 description = "Small, composable exercises for learning agent systems"
 readme = "README.md"

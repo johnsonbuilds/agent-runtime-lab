@@ -1,4 +1,4 @@
-# Agent Practice
+# Agent Runtime Lab
 
 一个面向学习者的 Agent 原理实践仓库。
 

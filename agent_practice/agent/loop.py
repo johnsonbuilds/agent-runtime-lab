@@ -21,10 +21,13 @@ class ToolExecutor(Protocol):
 
 def run_agent_loop(user_message: str, llm: ChatModel, tools: ToolExecutor,
                    max_iterations: int = 10) -> str:
+    
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+
     for _ in range(max_iterations):
         response = llm.chat(messages, tools.schemas)
         tool_calls = response.get("tool_calls") or []
+
         messages.append({"role": "assistant", "content": response.get("content") or "",
                          "tool_calls": tool_calls})
         if not tool_calls:
@@ -33,6 +36,7 @@ def run_agent_loop(user_message: str, llm: ChatModel, tools: ToolExecutor,
             function = tool_call["function"]
             arguments = json.loads(function.get("arguments") or "{}")
             result = tools.execute(function["name"], arguments)
+            
             messages.append({"role": "tool", "tool_call_id": tool_call["id"],
                              "content": str(result)})
 
