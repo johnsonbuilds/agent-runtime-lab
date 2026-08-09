@@ -4,9 +4,9 @@ import sys
 
 from dotenv import load_dotenv
 
-from agent_practice.agent.loop import run_agent_loop
-from agent_practice.providers.llm import OpenAICompatibleLLM
-from agent_practice.tools.tools import create_default_registry
+from runtime.agent.loop import run_agent_loop
+from runtime.providers.llm import OpenAICompatibleLLM
+from runtime.tools.tools import create_default_registry
 
 
 def main() -> None:
