@@ -43,23 +43,14 @@ def run_agent_loop(user_message: str, llm, tool_registry: dict, max_iterations: 
         messages.append({
             "role": "assistant",
             "content": response.get("content") or "",
-            "tool_calls": [
-                {
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {
-                        "name": tc["name"],
-                        "arguments": tc["arguments"],
-                    },
-                }
-                for tc in tool_calls
-            ],
+            "tool_calls": tool_calls,
         })
 
         if tool_calls:
             for tc in tool_calls:
-                name = tc["name"]
-                arguments = json.loads(tc["arguments"])  # JSON 字符串 → dict
+                function = tc["function"]
+                name = function["name"]
+                arguments = json.loads(function["arguments"])  # JSON 字符串 → dict
                 func = tool_registry[name]
                 result = func(**arguments)
 

@@ -48,7 +48,7 @@ class OpenAICompatibleLLM:
         tools: list[dict[str, Any]] | None = None,
         **request_kwargs: Any,
     ) -> dict[str, Any]:
-        """Send one chat-completion request and normalize its response."""
+        """Send one chat-completion request and preserve the API response shape."""
         kwargs = {"model": self.model, "messages": list(messages), **request_kwargs}
         if tools is not None:
             kwargs["tools"] = tools
@@ -56,15 +56,7 @@ class OpenAICompatibleLLM:
         response = await self.client.chat.completions.create(**kwargs)
         message = response.choices[0].message
 
-        tool_calls = []
-        for tool_call in message.tool_calls or []:
-            tool_calls.append(
-                {
-                    "id": tool_call.id,
-                    "name": tool_call.function.name,
-                    "arguments": tool_call.function.arguments,
-                }
-            )
+        tool_calls = [tool_call.model_dump(exclude_none=True) for tool_call in (message.tool_calls or [])]
 
         return {"content": message.content or "", "tool_calls": tool_calls}
 

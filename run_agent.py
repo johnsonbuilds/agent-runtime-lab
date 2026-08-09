@@ -5,7 +5,7 @@ import sys
 from dotenv import load_dotenv
 
 from agent_loop import run_agent_loop, tool_registry
-from mock_llm import OpenAICompatibleLLM
+from llm import OpenAICompatibleLLM
 
 
 def main() -> None:
