@@ -34,6 +34,29 @@ This project aims to build a modular Agent Runtime from first principles, where 
 
 ## Project Structure
 
+
+### docs
+
+Contains design documents, technical concepts, architecture explanations, and interview notes.
+
+It explains the "why" behind the Agent Runtime design, including core concepts, implementation decisions, and engineering trade-offs.
+
+### src
+
+Contains the core modular implementation of the Agent Runtime.
+
+Each component is designed as an independent and reusable module, such as agent loop, tool execution, memory management, and reliability mechanisms.
+
+### labs
+
+Contains runnable experiments and quick-start guides for validating modules implemented in `src`.
+
+Each lab provides a simple way to execute and explore a specific capability of the Agent Runtime.
+
+### tests
+
+Contains unit tests and integration tests to verify the correctness and reliability of the runtime components.
+
 agent-runtime-lab/
 
 ├── README.md
