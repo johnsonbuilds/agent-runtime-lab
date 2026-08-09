@@ -73,13 +73,15 @@ agent-runtime-lab/
 │   └── 005-reliable-agent
 
 
-├── runtime/
+├── src/
 
-│   ├── agent
+│   └── agent_runtime/
 
-│   ├── providers
+│       ├── agent
 
-│   └── tools
+│       ├── providers
+
+│       └── tools
 
 
 └── tests/

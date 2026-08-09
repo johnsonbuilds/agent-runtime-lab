@@ -1,12 +1,17 @@
 """Run the real OpenAI-compatible agent loop from the command line."""
 
 import sys
+from pathlib import Path
+
+
+SOURCE_DIR = Path(__file__).resolve().parent / "src" / "agent_runtime"
+sys.path.insert(0, str(SOURCE_DIR))
 
 from dotenv import load_dotenv
 
-from runtime.agent.loop import run_agent_loop
-from runtime.providers.llm import OpenAICompatibleLLM
-from runtime.tools.tools import create_default_registry
+from agent.loop import run_agent_loop
+from providers.llm import OpenAICompatibleLLM
+from tools.tools import create_default_registry
 
 
 def main() -> None:
