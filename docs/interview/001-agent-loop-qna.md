@@ -138,21 +138,13 @@ def run_agent_loop(
 
 ## Answer:
 
-> A minimal agent implementation can be built around an iterative agent loop.
->
-> First, we initialize the conversation state with the user's message.
->
-> Then, inside the loop, the agent sends the current messages and available tool schemas to the LLM.
->
-> The LLM decides whether it needs to call any tools.
->
-> If the response contains tool calls, the agent parses the tool arguments, dispatches the corresponding tools, executes them, and appends the tool results back into the conversation as observations.
->
-> The loop continues until the agent generates a final answer or reaches the maximum iteration limit.
->
-> If no tool call is returned, we treat the response as the final answer.
->
-> In production systems, we also need additional mechanisms such as retry strategies, timeout handling, validation, tracing, context management and failure recovery.
+A minimal agent can be implemented as an iterative loop. First, we initialize the conversation with the user's message. Then, the agent sends the current conversation and available tool schemas to the LLM.
+
+The LLM decides whether it needs to call a tool. If the response contains a tool call, the agent parses the arguments, dispatches the call to the corresponding tool, and executes it. The tool result is then appended to the conversation as an observation.
+
+The LLM can use the updated context to understand the current state and decide what to do next. If no tool call is required, we can return the final result.
+
+For a production system, we also need additional mechanisms such as retry strategies, timeout handling, tracing, context management, and failure recovery.
 
 ---
 
@@ -166,9 +158,9 @@ def run_agent_loop(
 
 > Because the LLM does not directly interact with the external environment.
 >
-> Tool execution produces new information, which becomes an observation from the environment.
+> After the LLM generates a tool call, the runtime dispatches the call to the corresponding tool and executes it. The tool produces a result, which is then appended to the conversation as an observation.
 >
-> We need to append this observation back into the conversation context so that the LLM can update its state and decide the next action.
+> The LLM can then use that observation to update its understanding of the current state and decide the next action.
 
 ---
 
