@@ -34,3 +34,11 @@ Then run:
 uv run python run_agent.py "How's the weather in Beijing today?"
 
 ```
+
+## UnitTest
+
+
+```bash
+uv run -m unittest discover -s tests/agent -v
+
+```
