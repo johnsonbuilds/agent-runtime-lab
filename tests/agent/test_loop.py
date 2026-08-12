@@ -6,7 +6,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
-from agent_runtime.agent.loop import run_agent_loop
+from agent_runtime.agent.loop import Conversation, run_turn
 from agent_runtime.tools.tools import ToolRegistry, ToolSpec
 
 
@@ -44,7 +44,7 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
             {"content": "recovered", "tool_calls": []},
         ])
 
-        self.assertEqual(run_agent_loop("weather", llm, make_registry()), "recovered")
+        self.assertEqual(run_turn("weather", llm, make_registry()), "recovered")
         self.assertIn("malformed JSON", llm.messages[1][-1]["content"])
 
     def test_unknown_tool_and_invalid_arguments_are_observations(self) -> None:
@@ -56,7 +56,7 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
             {"content": "recovered", "tool_calls": []},
         ])
 
-        self.assertEqual(run_agent_loop("weather", llm, make_registry()), "recovered")
+        self.assertEqual(run_turn("weather", llm, make_registry()), "recovered")
         observations = [message["content"] for message in llm.messages[1][-2:]]
         self.assertIn("unknown tool", observations[0])
         self.assertIn("must be string", observations[1])
@@ -71,7 +71,7 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
             {"content": "fallback", "tool_calls": []},
         ])
 
-        self.assertEqual(run_agent_loop("weather", llm, make_registry(failing_tool)), "fallback")
+        self.assertEqual(run_turn("weather", llm, make_registry(failing_tool)), "fallback")
         self.assertIn("service unavailable", llm.messages[1][-1]["content"])
 
     def test_missing_tool_call_id_does_not_crash(self) -> None:
@@ -81,16 +81,34 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
             {"content": "recovered", "tool_calls": []},
         ])
 
-        self.assertEqual(run_agent_loop("weather", llm, make_registry()), "recovered")
+        self.assertEqual(run_turn("weather", llm, make_registry()), "recovered")
         self.assertEqual(llm.messages[1][-1]["role"], "user")
         self.assertIn("tool_call_id is required", llm.messages[1][-1]["content"])
         self.assertIn("retry this tool call with a valid tool_call_id", llm.messages[1][-1]["content"])
 
     def test_llm_exception_is_returned(self) -> None:
         self.assertEqual(
-            run_agent_loop("hello", FakeLLM(error=RuntimeError("network down")), make_registry()),
+            run_turn("hello", FakeLLM(error=RuntimeError("network down")), make_registry()),
             "LLM error: network down",
         )
+
+    def test_conversation_preserves_context_between_turns(self) -> None:
+        llm = FakeLLM([
+            {"content": "first answer", "tool_calls": []},
+            {"content": "second answer", "tool_calls": []},
+        ])
+        conversation = Conversation()
+
+        self.assertEqual(run_turn("user input 1", llm, make_registry(),
+                                  conversation=conversation),
+                         "first answer")
+        self.assertEqual(run_turn("user input 2", llm, make_registry(),
+                                  conversation=conversation),
+                         "second answer")
+        self.assertEqual([message["content"] for message in conversation.messages
+                          if message["role"] == "user"], ["user input 1", "user input 2"])
+        self.assertEqual([message["content"] for message in llm.messages[1]
+                          if message["role"] == "user"], ["user input 1", "user input 2"])
 
 
 if __name__ == "__main__":

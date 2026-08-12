@@ -57,7 +57,7 @@ A minimal agent loop repeatedly allows the LLM to:
 A simplified implementation:
 
 ```python
-def run_agent_loop(
+def run_turn(
     user_message: str,
     llm: ChatModel,
     tools: ToolExecutor,
@@ -525,4 +525,3 @@ A strong Senior Agent Engineer answer:
 * [[LangGraph]]
 * [[Claude Code]]
 * [[Hermes Agent]]
-

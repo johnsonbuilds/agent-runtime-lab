@@ -9,7 +9,7 @@ sys.path.insert(0, str(SOURCE_DIR))
 
 from dotenv import load_dotenv
 
-from agent.loop import run_agent_loop
+from agent.loop import run_turn
 from providers.llm import OpenAICompatibleLLM
 from tools.tools import create_default_registry
 
@@ -24,7 +24,7 @@ def main() -> None:
 
     llm = OpenAICompatibleLLM()
     tools = create_default_registry()
-    print(run_agent_loop(prompt, llm, tools))
+    print(run_turn(prompt, llm, tools))
 
 
 if __name__ == "__main__":

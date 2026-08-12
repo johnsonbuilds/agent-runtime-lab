@@ -20,6 +20,16 @@ class ToolExecutor(Protocol):
     def execute(self, name: str, arguments: Mapping[str, Any]) -> Any: ...
 
 
+class Conversation:
+    """Conversation state shared by multiple agent turns."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    def append(self, message: dict[str, Any]) -> None:
+        self.messages.append(message)
+
+
 @dataclass(frozen=True)
 class ValidatedToolCall:
     """A tool call that is safe to pass to the executor."""
@@ -114,9 +124,12 @@ def _append_tool_observation(messages: list[dict[str, Any]], tool_call: Any,
         })
 
 
-def run_agent_loop(user_message: str, llm: ChatModel, tools: ToolExecutor,
-                   max_iterations: int = 10) -> str:
-    messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
+             max_iterations: int = 10,
+             *, conversation: Conversation | None = None) -> str:
+    conversation = conversation or Conversation()
+    conversation.append({"role": "user", "content": user_message})
+    messages = conversation.messages
 
     for _ in range(max_iterations):
         try:
