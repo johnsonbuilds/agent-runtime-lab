@@ -4,14 +4,14 @@ import sys
 from pathlib import Path
 
 
-SOURCE_DIR = Path(__file__).resolve().parent / "src" / "agent_runtime"
+SOURCE_DIR = Path(__file__).resolve().parent / "src"
 sys.path.insert(0, str(SOURCE_DIR))
 
 from dotenv import load_dotenv
 
-from agent.loop import Conversation, run_turn
-from providers.llm import OpenAICompatibleLLM
-from tools.tools import create_default_registry
+from agent_runtime.agent import Conversation, run_turn
+from agent_runtime.providers import OpenAICompatibleLLM
+from agent_runtime.tools import create_default_registry
 
 
 def main() -> None:

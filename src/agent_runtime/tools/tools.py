@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .shell import run_command
+
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -40,21 +42,14 @@ class ToolRegistry:
             raise ValueError(f"Unknown tool: {name}") from exc
         return spec.handler(**dict(arguments))
 
-
-def get_current_weather(location: str) -> str:
-    return f"{location}: 24 degrees Celsius, sunny"
-
-
-def get_current_time() -> str:
-    return "2026-08-06 15:45:00 (mock)"
-
-
 def create_default_registry() -> ToolRegistry:
     return ToolRegistry([
-        ToolSpec("get_current_weather", "Get the current weather for a city or region.",
+        ToolSpec("run_command", "Run a shell command and return its output and exit code.",
                  {"type": "object", "properties": {
-                     "location": {"type": "string", "description": "City or region name"}},
-                  "required": ["location"]}, get_current_weather),
-        ToolSpec("get_current_time", "Get the current time.",
-                 {"type": "object", "properties": {}}, get_current_time),
+                     "command": {"type": "string", "description": "Shell command to run"},
+                     "cwd": {"type": "string",
+                             "description": "Working directory for the command"},
+                     "timeout": {"type": "number", "description": "Timeout in seconds",
+                                 "default": 30}},
+                   "required": ["command"]}, run_command),
     ])

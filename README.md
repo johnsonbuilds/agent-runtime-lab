@@ -128,8 +128,30 @@ cp .env.example .env
 Then run:
 
 ```bash
-uv run python run_agent.py "How's the weather in Beijing today?"
+uv run python run_agent.py "List the files in the current directory"
 
+```
+
+If another project's virtual environment is active, use `uv run --active` or
+activate this project's `.venv` first. The warning about `VIRTUAL_ENV` is from
+uv and is separate from the agent runtime.
+
+To test the shell tool directly without an LLM:
+
+```bash
+PYTHONPATH=src uv run python -c \
+  'from agent_runtime.tools import run_command; print(run_command("printf hello"))'
+```
+
+Try a non-zero exit code, a working directory, and a timeout:
+
+```bash
+PYTHONPATH=src uv run python -c \
+  'from agent_runtime.tools import run_command; print(run_command("pwd", cwd="/tmp"))'
+PYTHONPATH=src uv run python -c \
+  'from agent_runtime.tools import run_command; print(run_command("exit 7"))'
+PYTHONPATH=src uv run python -c \
+  'from agent_runtime.tools import run_command; print(run_command("sleep 2", timeout=0.1))'
 ```
 
 ## RunTrace
