@@ -9,22 +9,30 @@ sys.path.insert(0, str(SOURCE_DIR))
 
 from dotenv import load_dotenv
 
-from agent.loop import run_turn
+from agent.loop import Conversation, run_turn
 from providers.llm import OpenAICompatibleLLM
 from tools.tools import create_default_registry
 
 
 def main() -> None:
     load_dotenv()
-    prompt = " ".join(sys.argv[1:]).strip()
-    if not prompt:
-        prompt = input("请输入问题：").strip()
-    if not prompt:
-        raise SystemExit("问题不能为空")
-
     llm = OpenAICompatibleLLM()
     tools = create_default_registry()
-    print(run_turn(prompt, llm, tools))
+    conversation = Conversation()
+    prompt = " ".join(sys.argv[1:]).strip()
+
+    while True:
+        if not prompt:
+            try:
+                prompt = input("> ").strip()
+            except EOFError:
+                print()
+                break
+        if prompt.lower() in {"exit", "quit"}:
+            break
+        if prompt:
+            print(run_turn(prompt, llm, tools, conversation=conversation))
+        prompt = ""
 
 
 if __name__ == "__main__":

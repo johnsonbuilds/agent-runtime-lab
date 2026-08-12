@@ -138,8 +138,13 @@ def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
             return f"LLM error: {exc}"
         tool_calls = response.get("tool_calls") or []
 
-        messages.append({"role": "assistant", "content": response.get("content") or "",
-                         "tool_calls": tool_calls})
+        assistant_message: dict[str, Any] = {
+            "role": "assistant",
+            "content": response.get("content") or "",
+        }
+        if tool_calls:
+            assistant_message["tool_calls"] = tool_calls
+        messages.append(assistant_message)
         if not tool_calls:
             return response.get("content", "")
         for tool_call in tool_calls:

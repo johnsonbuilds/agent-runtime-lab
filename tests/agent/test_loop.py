@@ -109,6 +109,7 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
                           if message["role"] == "user"], ["user input 1", "user input 2"])
         self.assertEqual([message["content"] for message in llm.messages[1]
                           if message["role"] == "user"], ["user input 1", "user input 2"])
+        self.assertNotIn("tool_calls", conversation.messages[1])
 
 
 if __name__ == "__main__":
