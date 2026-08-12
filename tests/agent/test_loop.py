@@ -1,4 +1,6 @@
 import sys
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -7,6 +9,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from agent_runtime.agent.loop import Conversation, run_turn
+from agent_runtime.trace import RunTrace
 from agent_runtime.tools.tools import ToolRegistry, ToolSpec
 
 
@@ -37,6 +40,43 @@ def make_registry(handler: Any = lambda location: location) -> ToolRegistry:
 
 
 class AgentLoopErrorHandlingTests(unittest.TestCase):
+    def test_run_trace_records_agent_loop_and_tool_events(self) -> None:
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": '{"location":"Singapore"}'}}]},
+            {"content": "It is sunny", "tool_calls": []},
+        ])
+        trace = RunTrace(run_id="r1")
+
+        self.assertEqual(run_turn("weather", llm, make_registry(), trace=trace),
+                         "It is sunny")
+        self.assertEqual(
+            [event.event_type for event in trace.events],
+            ["agent.start", "llm.request", "llm.response", "tool.request",
+             "tool.response", "llm.request", "llm.response", "agent.end"],
+        )
+        self.assertEqual({event.run_id for event in trace.events}, {"r1"})
+        self.assertEqual(len({event.event_id for event in trace.events}), len(trace.events))
+        llm_response = next(event for event in trace.events
+                            if event.event_type == "llm.response")
+        self.assertEqual(llm_response.data, {
+            "tool_count": 1, "tools": ["weather"], "final": False,
+        })
+        self.assertNotIn("tool_call", trace.events[4].data)
+        tool_response = next(event for event in trace.events
+                             if event.event_type == "tool.response")
+        self.assertNotIn("result", tool_response.data)
+
+    def test_run_trace_writes_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs" / "run-001.jsonl"
+            trace = RunTrace(run_id="r1", output_path=path)
+            trace.emit("agent.start")
+
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual(records[0]["event_type"], "agent.start")
+            self.assertEqual(records[0]["run_id"], "r1")
+
     def test_malformed_json_becomes_observation_and_loop_continues(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [{"id": "1", "function": {

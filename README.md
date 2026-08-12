@@ -132,6 +132,26 @@ uv run python run_agent.py "How's the weather in Beijing today?"
 
 ```
 
+## RunTrace
+
+The agent loop emits a provider-independent event stream for each run. Keep it
+in memory for tests, or append it as JSONL:
+
+```python
+from agent_runtime.agent import RunTrace, run_turn
+
+trace = RunTrace(run_id="run-001", output_path="runs/run-001.jsonl")
+answer = run_turn("What's the weather in Singapore?", llm, tools, trace=trace)
+```
+
+The event model contains lifecycle, LLM, and tool events: `agent.start`,
+`agent.end`, `agent.error`, `llm.request`, `llm.response`, `tool.request`,
+`tool.response`, and `tool.error`. Each JSONL record includes
+`run_id`, `event_id`, `event_type`, `timestamp`, `iteration`, and `data`.
+The default payload is intentionally compact: it records counts, names, IDs,
+durations, statuses, and errors, but not full prompts, model text, arguments, or
+tool results.
+
 ## Environment Variables
 
 The project uses an OpenAI-compatible Chat Completions API:
