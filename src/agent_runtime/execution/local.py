@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import time
 from typing import Any
@@ -29,7 +30,15 @@ def _error_result(started: float, exc: BaseException,
 class LocalShellExecutor:
     """Execute shell commands in the current Python process environment."""
 
-    def execute(
+    async def execute(
+        self,
+        command: str,
+        cwd: str | None = None,
+        timeout: float | None = 30.0,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self._execute, command, cwd, timeout)
+
+    def _execute(
         self,
         command: str,
         cwd: str | None = None,

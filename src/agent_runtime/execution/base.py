@@ -6,7 +6,7 @@ from typing import Any, Protocol
 
 
 class ShellExecutor(Protocol):
-    def execute(
+    async def execute(
         self,
         command: str,
         cwd: str | None = None,

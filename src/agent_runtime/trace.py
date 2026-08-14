@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Generator
+from typing import Any
 from uuid import uuid4
 
 
@@ -36,24 +38,37 @@ class RunTrace:
         self.events: list[RunEvent] = []
         self._output_path = Path(output_path) if output_path else None
         self._sink = sink
+        self._pending: list[RunEvent] = []
 
     def emit(self, event_type: str, iteration: int = 0,
              **data: Any) -> RunEvent:
         event = RunEvent(self.run_id, f"evt-{uuid4().hex}", event_type,
                          time.time(), iteration, data)
         self.events.append(event)
-        if self._output_path:
-            self._output_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._output_path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(event.to_dict(), ensure_ascii=True,
-                                        default=str) + "\n")
+        self._pending.append(event)
         if self._sink:
             self._sink(event)
         return event
 
+    async def flush(self) -> None:
+        """Persist queued events without blocking the event loop."""
+        if not self._output_path or not self._pending:
+            self._pending.clear()
+            return
+        pending = self._pending
+        self._pending = []
+        await asyncio.to_thread(self._write_events, pending)
+
+    def _write_events(self, events: list[RunEvent]) -> None:
+        self._output_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._output_path.open("a", encoding="utf-8") as stream:
+            for event in events:
+                stream.write(json.dumps(event.to_dict(), ensure_ascii=True,
+                                        default=str) + "\n")
+
     @contextmanager
     def span(self, name: str, iteration: int | None = None,
-             **meta: Any) -> Generator[dict[str, Any], None, None]:
+             **meta: Any):
         """Trace an operation with explicit start, error, and end events."""
         event_iteration = iteration if iteration is not None else 0
         span_meta = dict(meta)

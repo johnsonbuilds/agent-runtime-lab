@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
+import inspect
 from typing import Any
 
 from agent_runtime.execution.base import ShellExecutor
@@ -18,7 +19,7 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict[str, Any]
-    handler: Callable[..., Any]
+    handler: Callable[..., Awaitable[Any]]
 
     @property
     def schema(self) -> dict[str, Any]:
@@ -30,21 +31,25 @@ class ToolSpec:
 
 class ToolRegistry:
     def __init__(self, specs: list[ToolSpec] | None = None) -> None:
-        self._tools = {spec.name: spec for spec in specs or []}
+        self._tools: dict[str, ToolSpec] = {}
+        for spec in specs or []:
+            self.register(spec)
 
     @property
     def schemas(self) -> list[dict[str, Any]]:
         return [spec.schema for spec in self._tools.values()]
 
     def register(self, spec: ToolSpec) -> None:
+        if not inspect.iscoroutinefunction(spec.handler):
+            raise TypeError(f"Tool handler must be async: {spec.name}")
         self._tools[spec.name] = spec
 
-    def execute(self, name: str, arguments: Mapping[str, Any]) -> Any:
+    async def execute(self, name: str, arguments: Mapping[str, Any]) -> Any:
         try:
             spec = self._tools[name]
         except KeyError as exc:
             raise ValueError(f"Unknown tool: {name}") from exc
-        return spec.handler(**dict(arguments))
+        return await spec.handler(**dict(arguments))
 
 def create_default_registry(executor: ShellExecutor | None = None) -> ToolRegistry:
     shell_executor = executor if executor is not None else LocalShellExecutor()

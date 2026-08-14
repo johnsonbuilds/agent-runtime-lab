@@ -1,6 +1,7 @@
 """Run the real OpenAI-compatible agent loop from the command line."""
 
 import argparse
+import asyncio
 import sys
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from agent_runtime.providers import OpenAICompatibleLLM
 from agent_runtime.tools import create_default_registry
 
 
-def main() -> None:
+async def _run() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -42,8 +43,12 @@ def main() -> None:
         if prompt.lower() in {"exit", "quit"}:
             break
         if prompt:
-            print(run_turn(prompt, llm, tools, conversation=conversation, trace=trace))
+            print(await run_turn(prompt, llm, tools, conversation=conversation, trace=trace))
         prompt = ""
+
+
+def main() -> None:
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

@@ -9,21 +9,26 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from agent_runtime.tools.shell import run_command
 from agent_runtime.tools.tools import create_default_registry
+from agent_runtime.tools.tools import ToolRegistry, ToolSpec
 
 
 class RecordingExecutor:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None, float | None]] = []
 
-    def execute(self, command: str, cwd: str | None = None,
-                timeout: float | None = 30.0) -> dict[str, Any]:
+    async def execute(self, command: str, cwd: str | None = None,
+                      timeout: float | None = 30.0) -> dict[str, Any]:
         self.calls.append((command, cwd, timeout))
         return {"stdout": "sandbox", "stderr": "", "exit_code": 0, "duration": 0.0}
 
 
-class RunCommandTests(unittest.TestCase):
-    def test_captures_output_exit_code_and_duration(self) -> None:
-        result = run_command("printf 'hello'; printf 'bad' >&2; exit 3")
+class RunCommandTests(unittest.IsolatedAsyncioTestCase):
+    def test_sync_handler_is_rejected(self) -> None:
+        with self.assertRaisesRegex(TypeError, "must be async"):
+            ToolRegistry([ToolSpec("sync", "", {"type": "object"}, lambda: None)])
+
+    async def test_captures_output_exit_code_and_duration(self) -> None:
+        result = await run_command("printf 'hello'; printf 'bad' >&2; exit 3")
 
         self.assertEqual(result["stdout"], "hello")
         self.assertEqual(result["stderr"], "bad")
@@ -31,22 +36,22 @@ class RunCommandTests(unittest.TestCase):
         self.assertIsInstance(result["duration"], float)
         self.assertNotIn("error", result)
 
-    def test_uses_working_directory(self) -> None:
+    async def test_uses_working_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            result = run_command("pwd", cwd=directory)
+            result = await run_command("pwd", cwd=directory)
 
         self.assertEqual(result["exit_code"], 0)
         self.assertEqual(result["stdout"].strip(), directory)
 
-    def test_timeout_is_structured_error(self) -> None:
-        result = run_command("sleep 1", timeout=0.01)
+    async def test_timeout_is_structured_error(self) -> None:
+        result = await run_command("sleep 1", timeout=0.01)
 
         self.assertIsNone(result["exit_code"])
         self.assertEqual(result["error"]["type"], "TimeoutExpired")
         self.assertIn("duration", result)
 
-    def test_invalid_cwd_is_structured_error(self) -> None:
-        result = run_command("pwd", cwd="/path/that/does/not/exist")
+    async def test_invalid_cwd_is_structured_error(self) -> None:
+        result = await run_command("pwd", cwd="/path/that/does/not/exist")
 
         self.assertIsNone(result["exit_code"])
         self.assertEqual(result["error"]["type"], "FileNotFoundError")
@@ -56,11 +61,11 @@ class RunCommandTests(unittest.TestCase):
 
         self.assertIn("run_command", names)
 
-    def test_registry_uses_injected_executor(self) -> None:
+    async def test_registry_uses_injected_executor(self) -> None:
         executor = RecordingExecutor()
         registry = create_default_registry(executor)
 
-        result = registry.execute("run_command", {
+        result = await registry.execute("run_command", {
             "command": "printf from-sandbox",
             "cwd": "/workspace",
             "timeout": 5,

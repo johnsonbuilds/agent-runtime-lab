@@ -1,4 +1,3 @@
-import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -29,33 +28,30 @@ class FakeHarborEnvironment:
         return FakeExecResult("remote output", "remote error", 4)
 
 
-class ExecutorTests(unittest.TestCase):
-    def test_local_executor_runs_commands(self) -> None:
-        result = LocalShellExecutor().execute("printf local")
+class ExecutorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_executor_runs_commands(self) -> None:
+        result = await LocalShellExecutor().execute("printf local")
 
         self.assertEqual(result["stdout"], "local")
         self.assertEqual(result["exit_code"], 0)
         self.assertNotIn("error", result)
 
-    def test_harbor_executor_maps_exec_result(self) -> None:
+    async def test_harbor_executor_maps_exec_result(self) -> None:
         environment = FakeHarborEnvironment()
         executor = HarborShellExecutor(environment)
 
-        result = executor.execute("printf remote", cwd="/workspace", timeout=1.2)
+        result = await executor.execute("printf remote", cwd="/workspace", timeout=1.2)
 
         self.assertEqual(result["stdout"], "remote output")
         self.assertEqual(result["stderr"], "remote error")
         self.assertEqual(result["exit_code"], 4)
         self.assertEqual(environment.calls, [("printf remote", "/workspace", 2)])
 
-    def test_harbor_executor_works_inside_running_event_loop(self) -> None:
+    async def test_harbor_executor_works_inside_running_event_loop(self) -> None:
         environment = FakeHarborEnvironment()
         executor = HarborShellExecutor(environment)
 
-        async def run() -> dict[str, Any]:
-            return executor.execute("printf remote")
-
-        result = asyncio.run(run())
+        result = await executor.execute("printf remote")
 
         self.assertEqual(result["exit_code"], 4)
 

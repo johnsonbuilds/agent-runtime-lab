@@ -8,7 +8,7 @@ from agent_runtime.execution.base import ShellExecutor
 from agent_runtime.execution.local import LocalShellExecutor
 
 
-def run_command(command: str, cwd: str | None = None,
+async def run_command(command: str, cwd: str | None = None,
                 timeout: float | None = 30.0,
                 executor: ShellExecutor | None = None) -> dict[str, Any]:
     """Run a shell command without raising for command-level failures.
@@ -18,7 +18,7 @@ def run_command(command: str, cwd: str | None = None,
     Duration is measured in seconds.
     """
     shell_executor = executor if executor is not None else LocalShellExecutor()
-    return shell_executor.execute(command, cwd, timeout)
+    return await shell_executor.execute(command, cwd, timeout)
 
 
 __all__ = ["run_command"]

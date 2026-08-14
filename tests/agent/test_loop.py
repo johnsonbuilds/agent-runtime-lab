@@ -27,20 +27,24 @@ class FakeLLM:
         self.error = error
         self.messages: list[list[dict[str, Any]]] = []
 
-    def chat(self, messages: list[dict[str, Any]],
-             tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    async def achat(self, messages: list[dict[str, Any]],
+                    tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         self.messages.append(messages.copy())
         if self.error:
             raise self.error
         return self.responses.pop(0)
 
 
-def make_registry(handler: Any = lambda location: location) -> ToolRegistry:
+async def default_handler(location: str) -> str:
+    return location
+
+
+def make_registry(handler: Any = default_handler) -> ToolRegistry:
     return ToolRegistry([ToolSpec("weather", "", WEATHER_SCHEMA, handler)])
 
 
-class AgentLoopErrorHandlingTests(unittest.TestCase):
-    def test_run_trace_records_agent_loop_and_tool_events(self) -> None:
+class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_trace_records_agent_loop_and_tool_events(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [{"id": "1", "function": {
                 "name": "weather", "arguments": '{"location":"Singapore"}'}}]},
@@ -48,7 +52,7 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
         ])
         trace = RunTrace(run_id="r1")
 
-        self.assertEqual(run_turn("weather", llm, make_registry(), trace=trace),
+        self.assertEqual(await run_turn("weather", llm, make_registry(), trace=trace),
                          "It is sunny")
         self.assertEqual(
             [event.event_type for event in trace.events],
@@ -87,27 +91,28 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
         self.assertIn("duration_ms", trace.events[1].data)
         self.assertEqual(trace.events[3].data["error"], "failed")
 
-    def test_run_trace_writes_jsonl(self) -> None:
+    async def test_run_trace_writes_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs" / "run-001.jsonl"
             trace = RunTrace(run_id="r1", output_path=path)
             trace.emit("agent.start")
+            await trace.flush()
 
             records = [json.loads(line) for line in path.read_text().splitlines()]
             self.assertEqual(records[0]["event_type"], "agent.start")
             self.assertEqual(records[0]["run_id"], "r1")
 
-    def test_malformed_json_becomes_observation_and_loop_continues(self) -> None:
+    async def test_malformed_json_becomes_observation_and_loop_continues(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [{"id": "1", "function": {
                 "name": "weather", "arguments": "{"}}]},
             {"content": "recovered", "tool_calls": []},
         ])
 
-        self.assertEqual(run_turn("weather", llm, make_registry()), "recovered")
+        self.assertEqual(await run_turn("weather", llm, make_registry()), "recovered")
         self.assertIn("malformed JSON", llm.messages[1][-1]["content"])
 
-    def test_unknown_tool_and_invalid_arguments_are_observations(self) -> None:
+    async def test_unknown_tool_and_invalid_arguments_are_observations(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [
                 {"id": "unknown", "function": {"name": "missing", "arguments": "{}"}},
@@ -116,13 +121,13 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
             {"content": "recovered", "tool_calls": []},
         ])
 
-        self.assertEqual(run_turn("weather", llm, make_registry()), "recovered")
+        self.assertEqual(await run_turn("weather", llm, make_registry()), "recovered")
         observations = [message["content"] for message in llm.messages[1][-2:]]
         self.assertIn("unknown tool", observations[0])
         self.assertIn("must be string", observations[1])
 
-    def test_tool_exception_becomes_observation(self) -> None:
-        def failing_tool(location: str) -> str:
+    async def test_tool_exception_becomes_observation(self) -> None:
+        async def failing_tool(location: str) -> str:
             raise RuntimeError("service unavailable")
 
         llm = FakeLLM([
@@ -131,11 +136,11 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
             {"content": "fallback", "tool_calls": []},
         ])
 
-        self.assertEqual(run_turn("weather", llm, make_registry(failing_tool)), "fallback")
+        self.assertEqual(await run_turn("weather", llm, make_registry(failing_tool)), "fallback")
         self.assertIn("service unavailable", llm.messages[1][-1]["content"])
 
-    def test_tool_trace_records_error_and_loop_continues(self) -> None:
-        def failing_tool(location: str) -> str:
+    async def test_tool_trace_records_error_and_loop_continues(self) -> None:
+        async def failing_tool(location: str) -> str:
             raise RuntimeError("service unavailable")
 
         llm = FakeLLM([
@@ -145,8 +150,8 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
         ])
         trace = RunTrace(run_id="r1")
 
-        self.assertEqual(run_turn("weather", llm, make_registry(failing_tool),
-                                  trace=trace), "fallback")
+        self.assertEqual(await run_turn("weather", llm, make_registry(failing_tool),
+                                        trace=trace), "fallback")
         self.assertEqual(
             [event.event_type for event in trace.events],
             ["agent.start", "llm.start", "llm.end", "tool.start",
@@ -159,23 +164,23 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
         self.assertEqual(len(llm.messages), 2)
         self.assertIn("service unavailable", llm.messages[1][-1]["content"])
 
-    def test_missing_tool_call_id_does_not_crash(self) -> None:
+    async def test_missing_tool_call_id_does_not_crash(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [{"function": {
                 "name": "weather", "arguments": '{"location":"Paris"}'}}]},
             {"content": "recovered", "tool_calls": []},
         ])
 
-        self.assertEqual(run_turn("weather", llm, make_registry()), "recovered")
+        self.assertEqual(await run_turn("weather", llm, make_registry()), "recovered")
         self.assertEqual(llm.messages[1][-1]["role"], "user")
         self.assertIn("tool_call_id is required", llm.messages[1][-1]["content"])
         self.assertIn("retry this tool call with a valid tool_call_id", llm.messages[1][-1]["content"])
 
-    def test_llm_exception_is_returned(self) -> None:
+    async def test_llm_exception_is_returned(self) -> None:
         trace = RunTrace(run_id="r1")
         self.assertEqual(
-            run_turn("hello", FakeLLM(error=RuntimeError("network down")),
-                     make_registry(), trace=trace),
+            await run_turn("hello", FakeLLM(error=RuntimeError("network down")),
+                           make_registry(), trace=trace),
             "LLM error: network down",
         )
         self.assertEqual(
@@ -191,18 +196,18 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
         self.assertEqual(agent_error.data["error"], "LLM error: network down")
         self.assertEqual(agent_error.data["stage"], "llm")
 
-    def test_conversation_preserves_context_between_turns(self) -> None:
+    async def test_conversation_preserves_context_between_turns(self) -> None:
         llm = FakeLLM([
             {"content": "first answer", "tool_calls": []},
             {"content": "second answer", "tool_calls": []},
         ])
         conversation = Conversation()
 
-        self.assertEqual(run_turn("user input 1", llm, make_registry(),
-                                  conversation=conversation),
+        self.assertEqual(await run_turn("user input 1", llm, make_registry(),
+                                        conversation=conversation),
                          "first answer")
-        self.assertEqual(run_turn("user input 2", llm, make_registry(),
-                                  conversation=conversation),
+        self.assertEqual(await run_turn("user input 2", llm, make_registry(),
+                                        conversation=conversation),
                          "second answer")
         self.assertEqual([message["content"] for message in conversation.messages
                           if message["role"] == "user"], ["user input 1", "user input 2"])

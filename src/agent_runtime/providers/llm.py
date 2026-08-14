@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -30,15 +29,5 @@ class OpenAICompatibleLLM:
         message = response.choices[0].message
         calls = [call.model_dump(exclude_none=True) for call in (message.tool_calls or [])]
         return {"content": message.content or "", "tool_calls": calls}
-
-    def chat(self, messages: Sequence[dict[str, Any]],
-             tools: list[dict[str, Any]] | None = None,
-             **request_kwargs: Any) -> dict[str, Any]:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.achat(messages, tools, **request_kwargs))
-        raise RuntimeError("chat() cannot run inside an event loop; use achat()")
-
 
 OpenAILLM = OpenAICompatibleLLM

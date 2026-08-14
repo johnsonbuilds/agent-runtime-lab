@@ -11,15 +11,15 @@ from agent_runtime.trace import RunTrace
 
 
 class ChatModel(Protocol):
-    def chat(self, messages: list[dict[str, Any]],
-             tools: list[dict[str, Any]] | None = None) -> dict[str, Any]: ...
+    async def achat(self, messages: list[dict[str, Any]],
+                    tools: list[dict[str, Any]] | None = None) -> dict[str, Any]: ...
 
 
 class ToolExecutor(Protocol):
     @property
     def schemas(self) -> list[dict[str, Any]]: ...
 
-    def execute(self, name: str, arguments: Mapping[str, Any]) -> Any: ...
+    async def execute(self, name: str, arguments: Mapping[str, Any]) -> Any: ...
 
 
 class Conversation:
@@ -141,7 +141,7 @@ class _TurnFailure(Exception):
     """An expected turn failure that should be returned to the caller."""
 
 
-def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
+async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
               max_iterations: int, conversation: Conversation | None,
               trace: RunTrace, agent_meta: dict[str, Any]) -> str:
     conversation = conversation or Conversation()
@@ -154,7 +154,7 @@ def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                             message_count=len(messages),
                             tool_count=len(tools.schemas)) as span_meta:
                 
-                response = llm.chat(messages, tools.schemas)
+                response = await llm.achat(messages, tools.schemas)
                 tool_calls = response.get("tool_calls") or []
 
                 span_meta.update(
@@ -184,7 +184,7 @@ def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                                 **_tool_trace_metadata(tool_call)) as span_meta:
                     
                     validated = validate_tool_call(tool_call, tools.schemas)
-                    result = tools.execute(validated.name, validated.arguments)
+                    result = await tools.execute(validated.name, validated.arguments)
                     
                     span_meta.update(tool=validated.name, tool_call_id=validated.id)
             except Exception as exc:
@@ -199,7 +199,7 @@ def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
     try:
         with trace.span("llm", iteration,
                         message_count=len(messages), tool_count=0) as span_meta:
-            response = llm.chat(messages)
+            response = await llm.achat(messages)
             span_meta.update(tool_count=0, tools=[], final=True)
     except Exception as exc:
         error = f"LLM error: {exc}"
@@ -209,14 +209,16 @@ def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
     return answer
 
 
-def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
+async def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
              max_iterations: int = 10,
              *, conversation: Conversation | None = None,
              trace: RunTrace | None = None) -> str:
     trace = trace or RunTrace()
     try:
         with trace.span("agent") as agent_meta:
-            return _run_turn(user_message, llm, tools, max_iterations,
-                             conversation, trace, agent_meta)
+            return await _run_turn(user_message, llm, tools, max_iterations,
+                                   conversation, trace, agent_meta)
     except _TurnFailure as exc:
         return str(exc)
+    finally:
+        await trace.flush()
