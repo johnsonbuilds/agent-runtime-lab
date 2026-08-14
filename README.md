@@ -136,6 +136,21 @@ If another project's virtual environment is active, use `uv run --active` or
 activate this project's `.venv` first. The warning about `VIRTUAL_ENV` is from
 uv and is separate from the agent runtime.
 
+To run the Harbor adapter from this checkout, make the `src/` layout
+importable by Harbor's process:
+
+```bash
+PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" harbor run \
+  -d terminal-bench/terminal-bench-2 \
+  --agent agent_runtime.integrations.harbor:HarborAgent \
+  -l 1 \
+  --debug
+```
+
+Alternatively, install this project into the same environment that provides
+the `harbor` command with `uv pip install -e .` and run the command without
+the `PYTHONPATH` prefix.
+
 To test the shell tool directly without an LLM:
 
 ```bash

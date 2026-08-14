@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
@@ -23,6 +24,7 @@ class HarborAgent(BaseAgent):
 
     def __init__(self, *args: Any, llm: Any | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        load_dotenv()
         self.llm = llm if llm is not None else OpenAICompatibleLLM(model=self.model_name)
 
     @staticmethod
