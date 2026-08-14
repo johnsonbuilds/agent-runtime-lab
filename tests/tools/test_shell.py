@@ -2,12 +2,23 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from agent_runtime.tools.shell import run_command
 from agent_runtime.tools.tools import create_default_registry
+
+
+class RecordingExecutor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, float | None]] = []
+
+    def execute(self, command: str, cwd: str | None = None,
+                timeout: float | None = 30.0) -> dict[str, Any]:
+        self.calls.append((command, cwd, timeout))
+        return {"stdout": "sandbox", "stderr": "", "exit_code": 0, "duration": 0.0}
 
 
 class RunCommandTests(unittest.TestCase):
@@ -44,6 +55,19 @@ class RunCommandTests(unittest.TestCase):
         names = [schema["function"]["name"] for schema in create_default_registry().schemas]
 
         self.assertIn("run_command", names)
+
+    def test_registry_uses_injected_executor(self) -> None:
+        executor = RecordingExecutor()
+        registry = create_default_registry(executor)
+
+        result = registry.execute("run_command", {
+            "command": "printf from-sandbox",
+            "cwd": "/workspace",
+            "timeout": 5,
+        })
+
+        self.assertEqual(result["stdout"], "sandbox")
+        self.assertEqual(executor.calls, [("printf from-sandbox", "/workspace", 5)])
 
 
 if __name__ == "__main__":

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
+
+from agent_runtime.execution.base import ShellExecutor
+from agent_runtime.execution.local import LocalShellExecutor
 
 from .shell import run_command
 
@@ -42,7 +46,8 @@ class ToolRegistry:
             raise ValueError(f"Unknown tool: {name}") from exc
         return spec.handler(**dict(arguments))
 
-def create_default_registry() -> ToolRegistry:
+def create_default_registry(executor: ShellExecutor | None = None) -> ToolRegistry:
+    shell_executor = executor if executor is not None else LocalShellExecutor()
     return ToolRegistry([
         ToolSpec("run_command", "Run a shell command and return its output and exit code.",
                  {"type": "object", "properties": {
@@ -51,5 +56,6 @@ def create_default_registry() -> ToolRegistry:
                              "description": "Working directory for the command"},
                      "timeout": {"type": "number", "description": "Timeout in seconds",
                                  "default": 30}},
-                   "required": ["command"]}, run_command),
-    ])
+                    "required": ["command"]},
+                 partial(run_command, executor=shell_executor)),
+     ])
