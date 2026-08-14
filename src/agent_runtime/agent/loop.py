@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -138,35 +137,35 @@ def _tool_trace_metadata(tool_call: Any) -> dict[str, Any]:
     }
 
 
-def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
-             max_iterations: int = 10,
-             *, conversation: Conversation | None = None,
-             trace: RunTrace | None = None) -> str:
-    trace = trace or RunTrace()
-    trace.emit("agent.start")
+class _TurnFailure(Exception):
+    """An expected turn failure that should be returned to the caller."""
 
+
+def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
+              max_iterations: int, conversation: Conversation | None,
+              trace: RunTrace, agent_meta: dict[str, Any]) -> str:
     conversation = conversation or Conversation()
     conversation.append({"role": "user", "content": user_message})
     messages = conversation.messages
 
     for iteration in range(1, max_iterations + 1):
-        trace.emit("llm.request", iteration,
-                   message_count=len(messages), tool_count=len(tools.schemas))
-
         try:
-            response = llm.chat(messages, tools.schemas)
+            with trace.span("llm", iteration,
+                            message_count=len(messages),
+                            tool_count=len(tools.schemas)) as span_meta:
+                
+                response = llm.chat(messages, tools.schemas)
+                tool_calls = response.get("tool_calls") or []
+
+                span_meta.update(
+                    tool_count=len(tool_calls),
+                    tools=[_tool_trace_metadata(call).get("tool") for call in tool_calls],
+                    final=not tool_calls,
+                )
         except Exception as exc:
             error = f"LLM error: {exc}"
-            trace.emit("agent.error", iteration, error=str(exc), stage="llm")
-            trace.emit("agent.end", iteration, status="error", error=error)
-            return error
-
-        tool_calls = response.get("tool_calls") or []
-
-        trace.emit("llm.response", iteration,
-                   tool_count=len(tool_calls),
-                   tools=[_tool_trace_metadata(call).get("tool") for call in tool_calls],
-                   final=not tool_calls)
+            agent_meta.update(stage="llm", error=error)
+            raise _TurnFailure(error) from exc
 
         assistant_message: dict[str, Any] = {
             "role": "assistant",
@@ -175,40 +174,49 @@ def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
         messages.append(assistant_message)
+
         if not tool_calls:
             answer = response.get("content", "")
-            trace.emit("agent.end", iteration, status="success")
             return answer
         for tool_call in tool_calls:
-            started = time.monotonic()
-            trace.emit("tool.request", iteration, **_tool_trace_metadata(tool_call))
             try:
-                validated = validate_tool_call(tool_call, tools.schemas)
-                result = tools.execute(validated.name, validated.arguments)
+                with trace.span("tool", iteration,
+                                **_tool_trace_metadata(tool_call)) as span_meta:
+                    
+                    validated = validate_tool_call(tool_call, tools.schemas)
+                    result = tools.execute(validated.name, validated.arguments)
+                    
+                    span_meta.update(tool=validated.name, tool_call_id=validated.id)
             except Exception as exc:
-                trace.emit("tool.error", iteration, **_tool_trace_metadata(tool_call),
-                           error=str(exc), duration_ms=round(
-                               (time.monotonic() - started) * 1000, 3))
                 _append_tool_observation(messages, tool_call, f"Tool error: {exc}")
                 continue
-            trace.emit("tool.response", iteration, tool=validated.name,
-                       tool_call_id=validated.id,
-                       duration_ms=round((time.monotonic() - started) * 1000, 3))
             _append_tool_observation(messages, tool_call, str(result))
 
     messages.append({"role": "user", "content":
                      "Iteration limit reached. Summarize the progress and give the "
                      "best possible final answer. Do not call tools."})
     iteration = max_iterations + 1
-    trace.emit("llm.request", iteration, message_count=len(messages), tool_count=0)
     try:
-        response = llm.chat(messages)
+        with trace.span("llm", iteration,
+                        message_count=len(messages), tool_count=0) as span_meta:
+            response = llm.chat(messages)
+            span_meta.update(tool_count=0, tools=[], final=True)
     except Exception as exc:
         error = f"LLM error: {exc}"
-        trace.emit("agent.error", iteration, error=str(exc), stage="llm")
-        trace.emit("agent.end", iteration, status="error", error=error)
-        return error
+        agent_meta.update(stage="llm", error=error)
+        raise _TurnFailure(error) from exc
     answer = response.get("content", "")
-    trace.emit("llm.response", iteration, tool_count=0, tools=[], final=True)
-    trace.emit("agent.end", iteration, status="success")
     return answer
+
+
+def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
+             max_iterations: int = 10,
+             *, conversation: Conversation | None = None,
+             trace: RunTrace | None = None) -> str:
+    trace = trace or RunTrace()
+    try:
+        with trace.span("agent") as agent_meta:
+            return _run_turn(user_message, llm, tools, max_iterations,
+                             conversation, trace, agent_meta)
+    except _TurnFailure as exc:
+        return str(exc)

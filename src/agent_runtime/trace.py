@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Generator
 from uuid import uuid4
 
 
@@ -49,6 +50,29 @@ class RunTrace:
         if self._sink:
             self._sink(event)
         return event
+
+    @contextmanager
+    def span(self, name: str, iteration: int | None = None,
+             **meta: Any) -> Generator[dict[str, Any], None, None]:
+        """Trace an operation with explicit start, error, and end events."""
+        event_iteration = iteration if iteration is not None else 0
+        span_meta = dict(meta)
+        started = time.monotonic()
+        self.emit(f"{name}.start", event_iteration, **span_meta)
+        failed = False
+        try:
+            yield span_meta
+        except Exception as exc:
+            failed = True
+            span_meta["duration_ms"] = round((time.monotonic() - started) * 1000, 3)
+            error_meta = dict(span_meta)
+            error_meta["error"] = str(exc)
+            self.emit(f"{name}.error", event_iteration, **error_meta)
+            raise
+        finally:
+            span_meta["duration_ms"] = round((time.monotonic() - started) * 1000, 3)
+            span_meta["status"] = "error" if failed else "success"
+            self.emit(f"{name}.end", event_iteration, **span_meta)
 
 
 __all__ = ["RunEvent", "RunTrace"]

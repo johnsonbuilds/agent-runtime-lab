@@ -167,12 +167,16 @@ answer = run_turn("What's the weather in Singapore?", llm, tools, trace=trace)
 ```
 
 The event model contains lifecycle, LLM, and tool events: `agent.start`,
-`agent.end`, `agent.error`, `llm.request`, `llm.response`, `tool.request`,
-`tool.response`, and `tool.error`. Each JSONL record includes
+`agent.end`, `agent.error`, `llm.start`, `llm.error`, `llm.end`, `tool.start`,
+`tool.error`, and `tool.end`. Each JSONL record includes
 `run_id`, `event_id`, `event_type`, `timestamp`, `iteration`, and `data`.
 The default payload is intentionally compact: it records counts, names, IDs,
 durations, statuses, and errors, but not full prompts, model text, arguments, or
 tool results.
+
+Use `trace.span(name, ...)` to record an operation with explicit start, error,
+and end events. The end and error events include `duration_ms`; result metadata
+can be added through the yielded metadata dictionary.
 
 ## Environment Variables
 

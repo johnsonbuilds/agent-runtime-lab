@@ -52,20 +52,40 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
                          "It is sunny")
         self.assertEqual(
             [event.event_type for event in trace.events],
-            ["agent.start", "llm.request", "llm.response", "tool.request",
-             "tool.response", "llm.request", "llm.response", "agent.end"],
+            ["agent.start", "llm.start", "llm.end", "tool.start", "tool.end",
+             "llm.start", "llm.end", "agent.end"],
         )
         self.assertEqual({event.run_id for event in trace.events}, {"r1"})
         self.assertEqual(len({event.event_id for event in trace.events}), len(trace.events))
-        llm_response = next(event for event in trace.events
-                            if event.event_type == "llm.response")
-        self.assertEqual(llm_response.data, {
-            "tool_count": 1, "tools": ["weather"], "final": False,
-        })
-        self.assertNotIn("tool_call", trace.events[4].data)
-        tool_response = next(event for event in trace.events
-                             if event.event_type == "tool.response")
-        self.assertNotIn("result", tool_response.data)
+        llm_end = next(event for event in trace.events
+                       if event.event_type == "llm.end")
+        self.assertEqual(llm_end.data["tool_count"], 1)
+        self.assertEqual(llm_end.data["tools"], ["weather"])
+        self.assertFalse(llm_end.data["final"])
+        self.assertIn("duration_ms", llm_end.data)
+        tool_end = next(event for event in trace.events
+                        if event.event_type == "tool.end")
+        self.assertEqual(tool_end.data["tool"], "weather")
+        self.assertNotIn("result", tool_end.data)
+
+    def test_trace_span_records_lifecycle(self) -> None:
+        trace = RunTrace(run_id="r1")
+
+        with trace.span("operation", iteration=2, request_id="req-1") as meta:
+            meta["result_count"] = 3
+
+        with self.assertRaisesRegex(RuntimeError, "failed"):
+            with trace.span("failing_operation"):
+                raise RuntimeError("failed")
+
+        self.assertEqual(
+            [event.event_type for event in trace.events],
+            ["operation.start", "operation.end", "failing_operation.start",
+             "failing_operation.error", "failing_operation.end"],
+        )
+        self.assertEqual(trace.events[1].data["result_count"], 3)
+        self.assertIn("duration_ms", trace.events[1].data)
+        self.assertEqual(trace.events[3].data["error"], "failed")
 
     def test_run_trace_writes_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -114,6 +134,31 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
         self.assertEqual(run_turn("weather", llm, make_registry(failing_tool)), "fallback")
         self.assertIn("service unavailable", llm.messages[1][-1]["content"])
 
+    def test_tool_trace_records_error_and_loop_continues(self) -> None:
+        def failing_tool(location: str) -> str:
+            raise RuntimeError("service unavailable")
+
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": '{"location":"Paris"}'}}]},
+            {"content": "fallback", "tool_calls": []},
+        ])
+        trace = RunTrace(run_id="r1")
+
+        self.assertEqual(run_turn("weather", llm, make_registry(failing_tool),
+                                  trace=trace), "fallback")
+        self.assertEqual(
+            [event.event_type for event in trace.events],
+            ["agent.start", "llm.start", "llm.end", "tool.start",
+             "tool.error", "tool.end", "llm.start", "llm.end", "agent.end"],
+        )
+        tool_error = next(event for event in trace.events
+                          if event.event_type == "tool.error")
+        self.assertEqual(tool_error.data["error"], "service unavailable")
+        self.assertEqual(tool_error.data["tool"], "weather")
+        self.assertEqual(len(llm.messages), 2)
+        self.assertIn("service unavailable", llm.messages[1][-1]["content"])
+
     def test_missing_tool_call_id_does_not_crash(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [{"function": {
@@ -127,10 +172,24 @@ class AgentLoopErrorHandlingTests(unittest.TestCase):
         self.assertIn("retry this tool call with a valid tool_call_id", llm.messages[1][-1]["content"])
 
     def test_llm_exception_is_returned(self) -> None:
+        trace = RunTrace(run_id="r1")
         self.assertEqual(
-            run_turn("hello", FakeLLM(error=RuntimeError("network down")), make_registry()),
+            run_turn("hello", FakeLLM(error=RuntimeError("network down")),
+                     make_registry(), trace=trace),
             "LLM error: network down",
         )
+        self.assertEqual(
+            [event.event_type for event in trace.events],
+            ["agent.start", "llm.start", "llm.error", "llm.end",
+             "agent.error", "agent.end"],
+        )
+        llm_error = next(event for event in trace.events
+                         if event.event_type == "llm.error")
+        self.assertEqual(llm_error.data["error"], "network down")
+        agent_error = next(event for event in trace.events
+                           if event.event_type == "agent.error")
+        self.assertEqual(agent_error.data["error"], "LLM error: network down")
+        self.assertEqual(agent_error.data["stage"], "llm")
 
     def test_conversation_preserves_context_between_turns(self) -> None:
         llm = FakeLLM([
