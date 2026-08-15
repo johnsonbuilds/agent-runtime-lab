@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -11,8 +11,11 @@ from agent_runtime.trace import RunTrace
 
 
 class ChatModel(Protocol):
-    async def achat(self, messages: list[dict[str, Any]],
+    async def chat(self, messages: list[dict[str, Any]],
                     tools: list[dict[str, Any]] | None = None) -> dict[str, Any]: ...
+
+    def stream(self, messages: list[dict[str, Any]],
+               tools: list[dict[str, Any]] | None = None) -> AsyncIterator[dict[str, Any]]: ...
 
 
 class ToolExecutor(Protocol):
@@ -141,9 +144,54 @@ class _TurnFailure(Exception):
     """An expected turn failure that should be returned to the caller."""
 
 
+def _merge_stream_tool_call(calls: list[dict[str, Any]], delta: Mapping[str, Any]) -> None:
+    index = delta.get("index", len(calls))
+    if not isinstance(index, int):
+        index = len(calls)
+    while len(calls) <= index:
+        calls.append({"id": "", "function": {"name": "", "arguments": ""}})
+    target = calls[index]
+    if isinstance(delta.get("id"), str):
+        target["id"] = delta["id"]
+    function = delta.get("function")
+    if isinstance(function, Mapping):
+        target_function = target["function"]
+        if isinstance(function.get("name"), str):
+            target_function["name"] += function["name"]
+        if isinstance(function.get("arguments"), str):
+            target_function["arguments"] += function["arguments"]
+
+
+async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
+                        tools: list[dict[str, Any]] | None,
+                        trace: RunTrace, iteration: int,
+                        use_stream: bool) -> dict[str, Any]:
+    """Consume either runtime streaming or a single runtime response."""
+    if not use_stream:
+        chat = llm.chat
+        return await chat(messages, tools)
+
+    content: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    async for chunk in llm.stream(messages, tools):
+        if not isinstance(chunk, Mapping):
+            raise TypeError("LLM stream chunks must be objects")
+        text = chunk.get("content") or ""
+        if text:
+            content.append(str(text))
+        for delta in chunk.get("tool_calls") or []:
+            if not isinstance(delta, Mapping):
+                raise TypeError("LLM tool call chunks must be objects")
+            _merge_stream_tool_call(tool_calls, delta)
+        trace.emit("llm.chunk", iteration,
+                   content=text, tool_call_count=len(chunk.get("tool_calls") or []))
+    return {"content": "".join(content), "tool_calls": tool_calls}
+
+
 async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
               max_iterations: int, conversation: Conversation | None,
-              trace: RunTrace, agent_meta: dict[str, Any]) -> str:
+              trace: RunTrace, agent_meta: dict[str, Any],
+              use_stream: bool) -> str:
     conversation = conversation or Conversation()
     conversation.append({"role": "user", "content": user_message})
     messages = conversation.messages
@@ -154,7 +202,8 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                             message_count=len(messages),
                             tool_count=len(tools.schemas)) as span_meta:
                 
-                response = await llm.achat(messages, tools.schemas)
+                response = await _chat_response(llm, messages, tools.schemas, trace,
+                                                iteration, use_stream)
                 tool_calls = response.get("tool_calls") or []
 
                 span_meta.update(
@@ -199,7 +248,7 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
     try:
         with trace.span("llm", iteration,
                         message_count=len(messages), tool_count=0) as span_meta:
-            response = await llm.achat(messages)
+            response = await _chat_response(llm, messages, None, trace, iteration, use_stream)
             span_meta.update(tool_count=0, tools=[], final=True)
     except Exception as exc:
         error = f"LLM error: {exc}"
@@ -210,14 +259,15 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
 
 
 async def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
-             max_iterations: int = 10,
-             *, conversation: Conversation | None = None,
-             trace: RunTrace | None = None) -> str:
+              max_iterations: int = 10,
+              *, conversation: Conversation | None = None,
+              stream: bool = False,
+              trace: RunTrace | None = None) -> str:
     trace = trace or RunTrace()
     try:
         with trace.span("agent") as agent_meta:
             return await _run_turn(user_message, llm, tools, max_iterations,
-                                   conversation, trace, agent_meta)
+                                   conversation, trace, agent_meta, stream)
     except _TurnFailure as exc:
         return str(exc)
     finally:

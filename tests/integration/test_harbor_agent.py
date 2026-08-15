@@ -60,8 +60,11 @@ class FakeLLM:
             {"content": "completed", "tool_calls": []},
         ]
 
-    async def achat(self, messages: list[dict[str, Any]], tools: Any = None) -> dict[str, Any]:
+    async def chat(self, messages: list[dict[str, Any]], tools: Any = None) -> dict[str, Any]:
         return self.responses.pop(0)
+
+    async def stream(self, messages: list[dict[str, Any]], tools: Any = None):
+        yield self.responses.pop(0)
 
 
 class HarborAgentSmokeTests(unittest.IsolatedAsyncioTestCase):

@@ -27,12 +27,28 @@ class FakeLLM:
         self.error = error
         self.messages: list[list[dict[str, Any]]] = []
 
-    async def achat(self, messages: list[dict[str, Any]],
-                    tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    async def chat(self, messages: list[dict[str, Any]],
+                   tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         self.messages.append(messages.copy())
         if self.error:
             raise self.error
         return self.responses.pop(0)
+
+
+class StreamingLLM:
+    def __init__(self, responses: list[list[dict[str, Any]]]) -> None:
+        self.responses = responses
+        self.messages: list[list[dict[str, Any]]] = []
+
+    async def chat(self, messages: list[dict[str, Any]],
+                   tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        raise AssertionError("the runtime should use stream()")
+
+    async def stream(self, messages: list[dict[str, Any]],
+                     tools: list[dict[str, Any]] | None = None):
+        self.messages.append(messages.copy())
+        for chunk in self.responses.pop(0):
+            yield chunk
 
 
 async def default_handler(location: str) -> str:
@@ -44,6 +60,34 @@ def make_registry(handler: Any = default_handler) -> ToolRegistry:
 
 
 class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_streaming_response_preserves_tool_loop_semantics(self) -> None:
+        llm = StreamingLLM([
+            [
+                {"content": "Checking ", "tool_calls": []},
+                {"content": "weather", "tool_calls": []},
+                {"tool_calls": [{"index": 0, "id": "1",
+                                  "function": {"name": "weather", "arguments": "{"}}]},
+                {"tool_calls": [{"index": 0,
+                                  "function": {"arguments": "\"location\":\"Singapore\"}"}}]},
+            ],
+            [{"content": "It is sunny", "tool_calls": []}],
+        ])
+        trace = RunTrace(run_id="streaming")
+
+        self.assertEqual(await run_turn("weather", llm, make_registry(), stream=True,
+                                        trace=trace),
+                         "It is sunny")
+        self.assertEqual(
+            [event.event_type for event in trace.events],
+            ["agent.start", "llm.start", "llm.chunk", "llm.chunk", "llm.chunk",
+             "llm.chunk", "llm.end", "tool.start", "tool.end", "llm.start",
+             "llm.chunk", "llm.end", "agent.end"],
+        )
+        self.assertEqual(llm.messages[1][-1]["content"], "Singapore")
+        first_llm_end = next(event for event in trace.events
+                             if event.event_type == "llm.end")
+        self.assertEqual(first_llm_end.data["tool_count"], 1)
+
     async def test_run_trace_records_agent_loop_and_tool_events(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [{"id": "1", "function": {

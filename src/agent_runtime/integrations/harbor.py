@@ -62,7 +62,7 @@ class HarborAgent(BaseAgent):
         sync_context()
 
         try:
-            answer = await run_turn(instruction, self.llm, tools, trace=trace)
+            answer = await run_turn(instruction, self.llm, tools, stream=True, trace=trace)
             agent_error = next(
                 (event for event in reversed(trace.events)
                  if event.event_type == "agent.error"),
