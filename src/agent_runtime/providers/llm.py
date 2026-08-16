@@ -28,7 +28,11 @@ class OpenAICompatibleLLM:
         response = await self.client.chat.completions.create(**kwargs)
         message = response.choices[0].message
         calls = [call.model_dump(exclude_none=True) for call in (message.tool_calls or [])]
-        return {"content": message.content or "", "tool_calls": calls}
+        result = {"content": message.content or "", "tool_calls": calls}
+        reasoning = getattr(message, "reasoning_content", None)
+        if reasoning:
+            result["reasoning_content"] = reasoning
+        return result
 
     async def stream(self, messages: Sequence[dict[str, Any]],
                      tools: list[dict[str, Any]] | None = None,
@@ -42,7 +46,9 @@ class OpenAICompatibleLLM:
         async for chunk in response:
             choice = chunk.choices[0]
             delta = choice.delta
-            data: dict[str, Any] = {"content": delta.content or ""}
+            reasoning = getattr(delta, "reasoning_content", None) or ""
+            data: dict[str, Any] = {"content": delta.content or "",
+                                    "reasoning_content": reasoning}
             calls = []
             for call in (delta.tool_calls or []):
                 function = call.function
@@ -56,7 +62,7 @@ class OpenAICompatibleLLM:
                 })
             if calls:
                 data["tool_calls"] = calls
-            if data["content"] or calls:
+            if data["content"] or calls or reasoning:
                 yield data
 
 OpenAILLM = OpenAICompatibleLLM

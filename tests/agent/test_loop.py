@@ -63,6 +63,8 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
     async def test_streaming_response_preserves_tool_loop_semantics(self) -> None:
         llm = StreamingLLM([
             [
+                {"content": "", "reasoning_content": "thinking about weather",
+                 "tool_calls": []},
                 {"content": "Checking ", "tool_calls": []},
                 {"content": "weather", "tool_calls": []},
                 {"tool_calls": [{"index": 0, "id": "1",
@@ -80,10 +82,16 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [event.event_type for event in trace.events],
             ["agent.start", "llm.start", "llm.chunk", "llm.chunk", "llm.chunk",
-             "llm.chunk", "llm.end", "tool.start", "tool.end", "llm.start",
-             "llm.chunk", "llm.end", "agent.end"],
+             "llm.chunk", "llm.chunk", "llm.end", "tool.start", "tool.end",
+             "llm.start", "llm.chunk", "llm.end", "agent.end"],
         )
         self.assertEqual(llm.messages[1][-1]["content"], "Singapore")
+        self.assertEqual(llm.messages[1][1]["tool_calls"][0]["type"], "function")
+        self.assertEqual(llm.messages[1][1]["reasoning_content"],
+                         "thinking about weather")
+        reasoning_chunk = trace.events[2]
+        self.assertEqual(reasoning_chunk.data["reasoning_chars"],
+                         len("thinking about weather"))
         first_llm_end = next(event for event in trace.events
                              if event.event_type == "llm.end")
         self.assertEqual(first_llm_end.data["tool_count"], 1)

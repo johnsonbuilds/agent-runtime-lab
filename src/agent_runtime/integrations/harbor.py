@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,27 @@ from agent_runtime.tools import create_default_registry
 from agent_runtime.trace import RunEvent, RunTrace
 
 
+logger = logging.getLogger(__name__)
+
+
+def _enable_runtime_logging() -> None:
+    """Enable a small stderr logger without changing Harbor's logging setup."""
+    if os.getenv("AGENT_RUNTIME_LOG_STREAM", "").lower() not in {"1", "true", "yes"}:
+        return
+    runtime_logger = logging.getLogger("agent_runtime")
+    runtime_logger.setLevel(logging.DEBUG)
+    if not runtime_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("[agent-runtime] %(message)s"))
+        runtime_logger.addHandler(handler)
+    runtime_logger.propagate = False
+
+
+def _use_streaming() -> bool:
+    value = os.getenv("AGENT_RUNTIME_STREAM", "1").lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 class HarborAgent(BaseAgent):
     """Thin Harbor adapter that delegates execution to the existing runtime."""
 
@@ -25,6 +48,7 @@ class HarborAgent(BaseAgent):
     def __init__(self, *args: Any, llm: Any | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         load_dotenv()
+        _enable_runtime_logging()
         self.llm = llm if llm is not None else OpenAICompatibleLLM(model=self.model_name)
 
     @staticmethod
@@ -44,6 +68,9 @@ class HarborAgent(BaseAgent):
         context: AgentContext,
     ) -> None:
         trace_path = self.logs_dir / "agent-runtime.jsonl"
+        use_stream = _use_streaming()
+        logger.debug("task.start instruction=%r model=%r stream=%s",
+                     instruction, self.model_name, use_stream)
         runtime_metadata = self._runtime_metadata(context, instruction, trace_path)
 
         def sync_context() -> None:
@@ -62,7 +89,8 @@ class HarborAgent(BaseAgent):
         sync_context()
 
         try:
-            answer = await run_turn(instruction, self.llm, tools, stream=True, trace=trace)
+            answer = await run_turn(instruction, self.llm, tools,
+                                    stream=use_stream, trace=trace)
             agent_error = next(
                 (event for event in reversed(trace.events)
                  if event.event_type == "agent.error"),
@@ -70,10 +98,12 @@ class HarborAgent(BaseAgent):
             )
             runtime_metadata["status"] = "failed" if agent_error else "completed"
             runtime_metadata["answer"] = answer
+            logger.debug("task.end status=%s answer=%r", runtime_metadata["status"], answer)
             if agent_error:
                 runtime_metadata["error"] = agent_error.data.get("error", answer)
             sync_context()
         except BaseException as exc:
+            logger.debug("task.error type=%s message=%s", type(exc).__name__, exc)
             runtime_metadata["status"] = "failed"
             runtime_metadata["error"] = {
                 "type": type(exc).__name__,

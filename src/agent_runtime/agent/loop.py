@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 import json
+import asyncio
+import logging
+import os
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from agent_runtime.trace import RunTrace
+
+
+logger = logging.getLogger(__name__)
+
+
+def _stream_idle_timeout() -> float | None:
+    raw = os.getenv("AGENT_RUNTIME_STREAM_IDLE_TIMEOUT", "120")
+    try:
+        timeout = float(raw)
+    except ValueError:
+        return 120.0
+    return timeout if timeout > 0 else None
 
 
 class ChatModel(Protocol):
@@ -149,7 +164,8 @@ def _merge_stream_tool_call(calls: list[dict[str, Any]], delta: Mapping[str, Any
     if not isinstance(index, int):
         index = len(calls)
     while len(calls) <= index:
-        calls.append({"id": "", "function": {"name": "", "arguments": ""}})
+        calls.append({"id": "", "type": "function",
+                      "function": {"name": "", "arguments": ""}})
     target = calls[index]
     if isinstance(delta.get("id"), str):
         target["id"] = delta["id"]
@@ -172,20 +188,48 @@ async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
         return await chat(messages, tools)
 
     content: list[str] = []
+    reasoning: list[str] = []
     tool_calls: list[dict[str, Any]] = []
-    async for chunk in llm.stream(messages, tools):
+    logger.debug("llm.stream.start iteration=%d", iteration)
+    stream_iterator = llm.stream(messages, tools).__aiter__()
+    while True:
+        try:
+            timeout = _stream_idle_timeout()
+            if timeout is None:
+                chunk = await anext(stream_iterator)
+            else:
+                async with asyncio.timeout(timeout):
+                    chunk = await anext(stream_iterator)
+        except StopAsyncIteration:
+            break
+        except TimeoutError as exc:
+            logger.error("llm.stream.timeout iteration=%d timeout_seconds=%s",
+                         iteration, timeout)
+            raise RuntimeError(
+                f"LLM stream produced no chunk for {timeout:g} seconds"
+            ) from exc
         if not isinstance(chunk, Mapping):
             raise TypeError("LLM stream chunks must be objects")
         text = chunk.get("content") or ""
         if text:
             content.append(str(text))
+        reasoning_text = chunk.get("reasoning_content") or ""
+        if reasoning_text:
+            reasoning.append(str(reasoning_text))
         for delta in chunk.get("tool_calls") or []:
             if not isinstance(delta, Mapping):
                 raise TypeError("LLM tool call chunks must be objects")
             _merge_stream_tool_call(tool_calls, delta)
+        logger.debug("llm.chunk iteration=%d content=%r reasoning=%r tool_calls=%r",
+                     iteration, text, reasoning_text, chunk.get("tool_calls") or [])
         trace.emit("llm.chunk", iteration,
-                   content=text, tool_call_count=len(chunk.get("tool_calls") or []))
-    return {"content": "".join(content), "tool_calls": tool_calls}
+                   content=text, tool_call_count=len(chunk.get("tool_calls") or []),
+                   reasoning_chars=len(reasoning_text))
+    logger.debug("llm.stream.end iteration=%d", iteration)
+    response = {"content": "".join(content), "tool_calls": tool_calls}
+    if reasoning:
+        response["reasoning_content"] = "".join(reasoning)
+    return response
 
 
 async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
@@ -198,20 +242,28 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
 
     for iteration in range(1, max_iterations + 1):
         try:
+            logger.debug(
+                "llm.request.start iteration=%d messages=%d tools=%d stream=%s",
+                iteration, len(messages), len(tools.schemas), use_stream)
             with trace.span("llm", iteration,
                             message_count=len(messages),
                             tool_count=len(tools.schemas)) as span_meta:
-                
                 response = await _chat_response(llm, messages, tools.schemas, trace,
                                                 iteration, use_stream)
                 tool_calls = response.get("tool_calls") or []
+                content = response.get("content") or ""
 
                 span_meta.update(
                     tool_count=len(tool_calls),
                     tools=[_tool_trace_metadata(call).get("tool") for call in tool_calls],
                     final=not tool_calls,
                 )
+                logger.debug(
+                    "llm.request.end iteration=%d content_chars=%d tool_calls=%s",
+                    iteration, len(content),
+                    [_tool_trace_metadata(call).get("tool") for call in tool_calls])
         except Exception as exc:
+            logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
             error = f"LLM error: {exc}"
             agent_meta.update(stage="llm", error=error)
             raise _TurnFailure(error) from exc
@@ -220,23 +272,32 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
             "role": "assistant",
             "content": response.get("content") or "",
         }
+        reasoning_content = response.get("reasoning_content")
+        if reasoning_content:
+            assistant_message["reasoning_content"] = reasoning_content
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
         messages.append(assistant_message)
 
         if not tool_calls:
             answer = response.get("content", "")
+            logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
             return answer
         for tool_call in tool_calls:
+            tool_meta = _tool_trace_metadata(tool_call)
+            logger.debug("tool.dispatch iteration=%d tool=%r tool_call_id=%r",
+                         iteration, tool_meta.get("tool"), tool_meta.get("tool_call_id"))
             try:
-                with trace.span("tool", iteration,
-                                **_tool_trace_metadata(tool_call)) as span_meta:
-                    
+                with trace.span("tool", iteration, **tool_meta) as span_meta:
                     validated = validate_tool_call(tool_call, tools.schemas)
                     result = await tools.execute(validated.name, validated.arguments)
-                    
                     span_meta.update(tool=validated.name, tool_call_id=validated.id)
+                logger.debug(
+                    "tool.result iteration=%d tool=%r result_chars=%d",
+                    iteration, validated.name, len(str(result)))
             except Exception as exc:
+                logger.error("tool.error iteration=%d tool=%r error=%s",
+                             iteration, tool_meta.get("tool"), exc)
                 _append_tool_observation(messages, tool_call, f"Tool error: {exc}")
                 continue
             _append_tool_observation(messages, tool_call, str(result))
@@ -246,15 +307,21 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                      "best possible final answer. Do not call tools."})
     iteration = max_iterations + 1
     try:
+        logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
+                     iteration, len(messages), use_stream)
         with trace.span("llm", iteration,
                         message_count=len(messages), tool_count=0) as span_meta:
             response = await _chat_response(llm, messages, None, trace, iteration, use_stream)
             span_meta.update(tool_count=0, tools=[], final=True)
+            logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",
+                         iteration, len(response.get("content") or ""))
     except Exception as exc:
+        logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
         error = f"LLM error: {exc}"
         agent_meta.update(stage="llm", error=error)
         raise _TurnFailure(error) from exc
     answer = response.get("content", "")
+    logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
     return answer
 
 

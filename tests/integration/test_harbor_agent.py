@@ -1,6 +1,10 @@
 import sys
 import types
 import unittest
+import logging
+from contextlib import redirect_stderr
+from io import StringIO
+from os import environ
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -68,6 +72,29 @@ class FakeLLM:
 
 
 class HarborAgentSmokeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_logging_can_be_enabled_for_task_and_stream(self) -> None:
+        output = StringIO()
+        previous = environ.get("AGENT_RUNTIME_LOG_STREAM")
+        environ["AGENT_RUNTIME_LOG_STREAM"] = "1"
+        try:
+            with redirect_stderr(output), TemporaryDirectory() as directory:
+                agent = HarborAgent(Path(directory), model_name="test-model", llm=FakeLLM())
+                await agent.run("inspect task", FakeBaseEnvironment(), FakeAgentContext())
+        finally:
+            if previous is None:
+                environ.pop("AGENT_RUNTIME_LOG_STREAM", None)
+            else:
+                environ["AGENT_RUNTIME_LOG_STREAM"] = previous
+            runtime_logger = logging.getLogger("agent_runtime")
+            for handler in runtime_logger.handlers[:]:
+                runtime_logger.removeHandler(handler)
+                handler.close()
+            runtime_logger.propagate = True
+            runtime_logger.setLevel(logging.NOTSET)
+
+        self.assertIn("task.start", output.getvalue())
+        self.assertIn("llm.chunk", output.getvalue())
+
     async def test_run_reuses_runtime_and_populates_context(self) -> None:
         with TemporaryDirectory() as directory:
             agent = HarborAgent(Path(directory), model_name="test-model", llm=FakeLLM())
