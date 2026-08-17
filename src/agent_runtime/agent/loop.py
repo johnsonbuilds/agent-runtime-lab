@@ -6,10 +6,12 @@ import json
 import asyncio
 import logging
 import os
+import time
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from agent_runtime.events import EventEmitter
 from agent_runtime.trace import RunTrace
 
 
@@ -155,6 +157,48 @@ def _tool_trace_metadata(tool_call: Any) -> dict[str, Any]:
     }
 
 
+def _tail_text(text: Any, limit: int = 2000) -> str:
+    """Return the trailing part of a tool result for user-facing events."""
+    value = text if isinstance(text, str) else ("" if text is None else str(text))
+    value = value.rstrip()
+    if len(value) <= limit:
+        return value
+    return "..." + value[-limit:]
+
+
+def _tool_call_payload(tool_call: Any) -> dict[str, Any]:
+    """Best-effort user-facing view of an untrusted tool call."""
+    if not isinstance(tool_call, Mapping):
+        return {"tool": None, "call_id": None, "arguments": str(tool_call)}
+    function = tool_call.get("function")
+    name = raw_arguments = None
+    if isinstance(function, Mapping):
+        name = function.get("name")
+        raw_arguments = function.get("arguments")
+    arguments: Any = raw_arguments
+    if isinstance(raw_arguments, str) and raw_arguments:
+        try:
+            arguments = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            arguments = raw_arguments
+    return {"tool": name, "call_id": tool_call.get("id"), "arguments": arguments}
+
+
+def _tool_result_summary(result: Any) -> dict[str, Any]:
+    """Summarize a tool result for user-facing events."""
+    if isinstance(result, Mapping) and "exit_code" in result and "stdout" in result:
+        summary: dict[str, Any] = {
+            "exit_code": result.get("exit_code"),
+            "stdout_tail": _tail_text(result.get("stdout")),
+            "stderr_tail": _tail_text(result.get("stderr")),
+        }
+        error = result.get("error")
+        if isinstance(error, Mapping):
+            summary["error"] = f"{error.get('type', 'Error')}: {error.get('message', '')}"
+        return summary
+    return {"result": _tail_text(result)}
+
+
 class _TurnFailure(Exception):
     """An expected turn failure that should be returned to the caller."""
 
@@ -178,15 +222,11 @@ def _merge_stream_tool_call(calls: list[dict[str, Any]], delta: Mapping[str, Any
             target_function["arguments"] += function["arguments"]
 
 
-async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
-                        tools: list[dict[str, Any]] | None,
-                        trace: RunTrace, iteration: int,
-                        use_stream: bool) -> dict[str, Any]:
-    """Consume either runtime streaming or a single runtime response."""
-    if not use_stream:
-        chat = llm.chat
-        return await chat(messages, tools)
-
+async def _consume_stream(llm: ChatModel, messages: list[dict[str, Any]],
+                          tools: list[dict[str, Any]] | None,
+                          trace: RunTrace, iteration: int,
+                          events: EventEmitter) -> dict[str, Any]:
+    """Assemble one response from provider streaming chunks."""
     content: list[str] = []
     reasoning: list[str] = []
     tool_calls: list[dict[str, Any]] = []
@@ -220,6 +260,9 @@ async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
             if not isinstance(delta, Mapping):
                 raise TypeError("LLM tool call chunks must be objects")
             _merge_stream_tool_call(tool_calls, delta)
+        if text or reasoning_text:
+            events.emit("assistant.delta", iteration,
+                        content=text, reasoning=reasoning_text)
         logger.debug("llm.chunk iteration=%d content=%r reasoning=%r tool_calls=%r",
                      iteration, text, reasoning_text, chunk.get("tool_calls") or [])
         trace.emit("llm.chunk", iteration,
@@ -232,11 +275,34 @@ async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
     return response
 
 
+async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
+                         tools: list[dict[str, Any]] | None,
+                         trace: RunTrace, iteration: int,
+                         use_stream: bool, events: EventEmitter) -> dict[str, Any]:
+    """Consume either runtime streaming or a single runtime response."""
+    events.emit("assistant.started", iteration)
+    if not use_stream:
+        chat = llm.chat
+        response = await chat(messages, tools)
+        content = response.get("content") or ""
+        reasoning = response.get("reasoning_content") or ""
+        if content or reasoning:
+            events.emit("assistant.delta", iteration,
+                        content=content, reasoning=reasoning)
+    else:
+        response = await _consume_stream(llm, messages, tools, trace, iteration, events)
+    events.emit("assistant.completed", iteration,
+                tool_calls=[_tool_trace_metadata(call).get("tool")
+                            for call in response.get("tool_calls") or []])
+    return response
+
+
 async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
-              max_iterations: int, conversation: Conversation | None,
-              trace: RunTrace, agent_meta: dict[str, Any],
-              use_stream: bool) -> str:
+               max_iterations: int, conversation: Conversation | None,
+               trace: RunTrace, agent_meta: dict[str, Any],
+               use_stream: bool, events: EventEmitter) -> str:
     conversation = conversation or Conversation()
+    events.emit("agent.started", message=user_message)
     conversation.append({"role": "user", "content": user_message})
     messages = conversation.messages
 
@@ -249,7 +315,7 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                             message_count=len(messages),
                             tool_count=len(tools.schemas)) as span_meta:
                 response = await _chat_response(llm, messages, tools.schemas, trace,
-                                                iteration, use_stream)
+                                                iteration, use_stream, events)
                 tool_calls = response.get("tool_calls") or []
                 content = response.get("content") or ""
 
@@ -282,11 +348,16 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
         if not tool_calls:
             answer = response.get("content", "")
             logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
+            events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
             return answer
         for tool_call in tool_calls:
             tool_meta = _tool_trace_metadata(tool_call)
             logger.debug("tool.dispatch iteration=%d tool=%r tool_call_id=%r",
                          iteration, tool_meta.get("tool"), tool_meta.get("tool_call_id"))
+            payload = _tool_call_payload(tool_call)
+            events.emit("tool.started", iteration, call_id=payload["call_id"],
+                        tool=payload["tool"], arguments=payload["arguments"])
+            tool_started = time.monotonic()
             try:
                 with trace.span("tool", iteration, **tool_meta) as span_meta:
                     validated = validate_tool_call(tool_call, tools.schemas)
@@ -295,9 +366,14 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                 logger.debug(
                     "tool.result iteration=%d tool=%r result_chars=%d",
                     iteration, validated.name, len(str(result)))
+                events.emit("tool.completed", iteration, call_id=payload["call_id"],
+                            duration=round(time.monotonic() - tool_started, 3),
+                            **_tool_result_summary(result))
             except Exception as exc:
                 logger.error("tool.error iteration=%d tool=%r error=%s",
                              iteration, tool_meta.get("tool"), exc)
+                events.emit("tool.failed", iteration, call_id=payload["call_id"],
+                            tool=payload["tool"], error=str(exc))
                 _append_tool_observation(messages, tool_call, f"Tool error: {exc}")
                 continue
             _append_tool_observation(messages, tool_call, str(result))
@@ -308,10 +384,11 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
     iteration = max_iterations + 1
     try:
         logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
-                     iteration, len(messages), use_stream)
+                      iteration, len(messages), use_stream)
         with trace.span("llm", iteration,
                         message_count=len(messages), tool_count=0) as span_meta:
-            response = await _chat_response(llm, messages, None, trace, iteration, use_stream)
+            response = await _chat_response(llm, messages, None, trace, iteration,
+                                            use_stream, events)
             span_meta.update(tool_count=0, tools=[], final=True)
             logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",
                          iteration, len(response.get("content") or ""))
@@ -322,20 +399,30 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
         raise _TurnFailure(error) from exc
     answer = response.get("content", "")
     logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
+    events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
     return answer
 
 
 async def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
-              max_iterations: int = 10,
-              *, conversation: Conversation | None = None,
-              stream: bool = False,
-              trace: RunTrace | None = None) -> str:
+               max_iterations: int = 10, *,
+               conversation: Conversation | None = None,
+               stream: bool = False,
+               trace: RunTrace | None = None,
+               events: EventEmitter | None = None) -> str:
     trace = trace or RunTrace()
+    events = events or EventEmitter(run_id=trace.run_id)
+    agent_meta: dict[str, Any] = {}
     try:
         with trace.span("agent") as agent_meta:
             return await _run_turn(user_message, llm, tools, max_iterations,
-                                   conversation, trace, agent_meta, stream)
+                                   conversation, trace, agent_meta, stream, events)
     except _TurnFailure as exc:
+        events.emit("runtime.error", stage=agent_meta.get("stage", "agent"),
+                    error=str(exc))
         return str(exc)
+    except Exception as exc:
+        events.emit("runtime.error", stage=agent_meta.get("stage", "agent"),
+                    error=f"{type(exc).__name__}: {exc}")
+        raise
     finally:
         await trace.flush()

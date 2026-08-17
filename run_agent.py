@@ -12,6 +12,8 @@ sys.path.insert(0, str(SOURCE_DIR))
 from dotenv import load_dotenv
 
 from agent_runtime.agent import Conversation, RunTrace, run_turn
+from agent_runtime.channels import CLIRenderer
+from agent_runtime.events import EventEmitter
 from agent_runtime.providers import OpenAICompatibleLLM
 from agent_runtime.tools import create_default_registry
 
@@ -30,7 +32,9 @@ async def _run() -> None:
     llm = OpenAICompatibleLLM()
     tools = create_default_registry()
     conversation = Conversation()
-    trace = RunTrace(output_path=args.trace) if args.trace else None
+    trace = RunTrace(output_path=args.trace) if args.trace else RunTrace()
+    events = EventEmitter(run_id=trace.run_id)
+    events.subscribe(CLIRenderer())
     prompt = " ".join(args.prompt).strip()
 
     while True:
@@ -43,7 +47,8 @@ async def _run() -> None:
         if prompt.lower() in {"exit", "quit"}:
             break
         if prompt:
-            print(await run_turn(prompt, llm, tools, conversation=conversation, trace=trace))
+            await run_turn(prompt, llm, tools, conversation=conversation,
+                           stream=True, trace=trace, events=events)
         prompt = ""
 
 
