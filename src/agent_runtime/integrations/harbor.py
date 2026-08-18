@@ -14,6 +14,7 @@ from harbor.models.agent.context import AgentContext
 
 from agent_runtime.agent import run_turn
 from agent_runtime.execution.harbor import HarborShellExecutor
+from agent_runtime.harness import HarnessSpec, resolve_harness
 from agent_runtime.providers import OpenAICompatibleLLM
 from agent_runtime.tools import create_default_registry
 from agent_runtime.trace import RunEvent, RunTrace
@@ -69,8 +70,9 @@ class HarborAgent(BaseAgent):
     ) -> None:
         trace_path = self.logs_dir / "agent-runtime.jsonl"
         use_stream = _use_streaming()
-        logger.debug("task.start instruction=%r model=%r stream=%s",
-                     instruction, self.model_name, use_stream)
+        harness: HarnessSpec = resolve_harness(os.getenv("AGENT_RUNTIME_HARNESS"))
+        logger.debug("task.start instruction=%r model=%r stream=%s harness=%s",
+                     instruction, self.model_name, use_stream, harness.id)
         runtime_metadata = self._runtime_metadata(context, instruction, trace_path)
 
         def sync_context() -> None:
@@ -83,13 +85,15 @@ class HarborAgent(BaseAgent):
             runtime_metadata["last_event"] = event.to_dict()
             sync_context()
 
-        trace = RunTrace(output_path=trace_path, sink=record_event)
-        tools = create_default_registry(HarborShellExecutor(environment))
+        trace = RunTrace(output_path=trace_path, sink=record_event, harness=harness)
+        tools = create_default_registry(HarborShellExecutor(environment),
+                                        enabled=list(harness.tools.enabled))
         runtime_metadata["status"] = "running"
         sync_context()
 
         try:
             answer = await run_turn(instruction, self.llm, tools,
+                                    harness=harness,
                                     stream=use_stream, trace=trace)
             agent_error = next(
                 (event for event in reversed(trace.events)

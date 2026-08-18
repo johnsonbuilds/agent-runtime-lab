@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 from agent_runtime.agent import Conversation, RunTrace, run_turn
 from agent_runtime.channels import CLIRenderer
 from agent_runtime.events import EventEmitter
+from agent_runtime.harness import resolve_harness
 from agent_runtime.providers import OpenAICompatibleLLM
 from agent_runtime.tools import create_default_registry
 
@@ -26,13 +28,22 @@ async def _run() -> None:
         metavar="PATH",
         help="append run events as JSONL to PATH",
     )
+    parser.add_argument(
+        "--harness",
+        metavar="PATH_OR_ID",
+        default=os.getenv("AGENT_RUNTIME_HARNESS"),
+        help="harness manifest to run (file path, id under harnesses/, "
+             "or omit for the built-in baseline)",
+    )
     parser.add_argument("prompt", nargs="*", help="prompt to send; omit for interactive mode")
     args = parser.parse_args()
 
+    harness = resolve_harness(args.harness)
     llm = OpenAICompatibleLLM()
-    tools = create_default_registry()
+    tools = create_default_registry(enabled=list(harness.tools.enabled))
     conversation = Conversation()
-    trace = RunTrace(output_path=args.trace) if args.trace else RunTrace()
+    trace = (RunTrace(output_path=args.trace, harness=harness) if args.trace
+             else RunTrace(harness=harness))
     events = EventEmitter(run_id=trace.run_id)
     events.subscribe(CLIRenderer())
     prompt = " ".join(args.prompt).strip()
@@ -48,7 +59,7 @@ async def _run() -> None:
             break
         if prompt:
             await run_turn(prompt, llm, tools, conversation=conversation,
-                           stream=True, trace=trace, events=events)
+                           harness=harness, stream=True, trace=trace, events=events)
         prompt = ""
 
 

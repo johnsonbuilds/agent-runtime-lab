@@ -51,16 +51,37 @@ class ToolRegistry:
             raise ValueError(f"Unknown tool: {name}") from exc
         return await spec.handler(**dict(arguments))
 
-def create_default_registry(executor: ShellExecutor | None = None) -> ToolRegistry:
+
+def _run_command_spec(executor: ShellExecutor) -> ToolSpec:
+    return ToolSpec("run_command", "Run a shell command and return its output and exit code.",
+                    {"type": "object", "properties": {
+                        "command": {"type": "string", "description": "Shell command to run"},
+                        "cwd": {"type": "string",
+                                "description": "Working directory for the command"},
+                        "timeout": {"type": "number", "description": "Timeout in seconds",
+                                    "default": 30}},
+                     "required": ["command"]},
+                    partial(run_command, executor=executor))
+
+
+def builtin_tool_specs(executor: ShellExecutor) -> list[ToolSpec]:
+    """Every tool the runtime knows how to build."""
+    return [_run_command_spec(executor)]
+
+
+def create_default_registry(executor: ShellExecutor | None = None,
+                            enabled: list[str] | None = None) -> ToolRegistry:
+    """Build the tool registry, optionally filtered by the harness gene.
+
+    ``enabled=None`` keeps every built-in tool; otherwise the registry
+    exposes exactly the named tools, in the given order.
+    """
     shell_executor = executor if executor is not None else LocalShellExecutor()
-    return ToolRegistry([
-        ToolSpec("run_command", "Run a shell command and return its output and exit code.",
-                 {"type": "object", "properties": {
-                     "command": {"type": "string", "description": "Shell command to run"},
-                     "cwd": {"type": "string",
-                             "description": "Working directory for the command"},
-                     "timeout": {"type": "number", "description": "Timeout in seconds",
-                                 "default": 30}},
-                    "required": ["command"]},
-                 partial(run_command, executor=shell_executor)),
-     ])
+    specs = builtin_tool_specs(shell_executor)
+    if enabled is None:
+        return ToolRegistry(specs)
+    by_name = {spec.name: spec for spec in specs}
+    unknown = [name for name in enabled if name not in by_name]
+    if unknown:
+        raise ValueError(f"Unknown tools in harness: {unknown}")
+    return ToolRegistry([by_name[name] for name in enabled])

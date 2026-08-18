@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from agent_runtime.events import EventEmitter
+from agent_runtime.harness import HarnessSpec, default_harness
 from agent_runtime.trace import RunTrace
 
 
@@ -144,6 +145,15 @@ def _append_tool_observation(messages: list[dict[str, Any]], tool_call: Any,
             "role": "user",
             "content": f"{content} Please retry this tool call with a valid tool_call_id.",
         })
+
+
+def _ensure_system_prompt(conversation: Conversation, system: str) -> None:
+    """Insert the harness system prompt once, before the first user message."""
+    if not system:
+        return
+    if any(message.get("role") == "system" for message in conversation.messages):
+        return
+    conversation.messages.insert(0, {"role": "system", "content": system})
 
 
 def _tool_trace_metadata(tool_call: Any) -> dict[str, Any]:
@@ -298,11 +308,13 @@ async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
 
 
 async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
-               max_iterations: int, conversation: Conversation | None,
+               max_iterations: int, harness: HarnessSpec,
+               conversation: Conversation | None,
                trace: RunTrace, agent_meta: dict[str, Any],
                use_stream: bool, events: EventEmitter) -> str:
     conversation = conversation or Conversation()
     events.emit("agent.started", message=user_message)
+    _ensure_system_prompt(conversation, harness.prompt.system)
     conversation.append({"role": "user", "content": user_message})
     messages = conversation.messages
 
@@ -374,13 +386,14 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                              iteration, tool_meta.get("tool"), exc)
                 events.emit("tool.failed", iteration, call_id=payload["call_id"],
                             tool=payload["tool"], error=str(exc))
-                _append_tool_observation(messages, tool_call, f"Tool error: {exc}")
+                observation = harness.tool_error_observation(
+                    exc, tool=payload["tool"])
+                _append_tool_observation(messages, tool_call, observation)
                 continue
             _append_tool_observation(messages, tool_call, str(result))
 
     messages.append({"role": "user", "content":
-                     "Iteration limit reached. Summarize the progress and give the "
-                     "best possible final answer. Do not call tools."})
+                     harness.prompt.iteration_limit_notice})
     iteration = max_iterations + 1
     try:
         logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
@@ -404,17 +417,26 @@ async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
 
 
 async def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
-               max_iterations: int = 10, *,
+               max_iterations: int | None = None, *,
+               harness: HarnessSpec | None = None,
                conversation: Conversation | None = None,
                stream: bool = False,
                trace: RunTrace | None = None,
                events: EventEmitter | None = None) -> str:
-    trace = trace or RunTrace()
+    """Run one agent turn under the given harness.
+
+    ``max_iterations`` explicitly overrides ``harness.control``; the
+    harness is otherwise the source of truth for how the agent behaves.
+    """
+    harness = harness or default_harness()
+    iterations = (max_iterations if max_iterations is not None
+                  else harness.control.max_iterations)
+    trace = trace or RunTrace(harness=harness)
     events = events or EventEmitter(run_id=trace.run_id)
     agent_meta: dict[str, Any] = {}
     try:
         with trace.span("agent") as agent_meta:
-            return await _run_turn(user_message, llm, tools, max_iterations,
+            return await _run_turn(user_message, llm, tools, iterations, harness,
                                    conversation, trace, agent_meta, stream, events)
     except _TurnFailure as exc:
         events.emit("runtime.error", stage=agent_meta.get("stage", "agent"),

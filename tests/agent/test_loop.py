@@ -9,6 +9,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from agent_runtime.agent.loop import Conversation, run_turn
+from agent_runtime.harness import HarnessSpec, PromptGenome, ControlGenome
 from agent_runtime.trace import RunTrace
 from agent_runtime.tools.tools import ToolRegistry, ToolSpec
 
@@ -266,6 +267,79 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([message["content"] for message in llm.messages[1]
                           if message["role"] == "user"], ["user input 1", "user input 2"])
         self.assertNotIn("tool_calls", conversation.messages[1])
+
+
+class HarnessIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_harness_sends_no_system_message(self) -> None:
+        llm = FakeLLM([{"content": "hi", "tool_calls": []}])
+
+        await run_turn("hello", llm, make_registry())
+
+        self.assertEqual(llm.messages[0][0]["role"], "user")
+
+    async def test_system_prompt_gene_is_injected_before_user_message(self) -> None:
+        llm = FakeLLM([{"content": "hi", "tool_calls": []},
+                       {"content": "again", "tool_calls": []}])
+        harness = HarnessSpec(id="with-system",
+                              prompt=PromptGenome(system="You are a shell agent."))
+        conversation = Conversation()
+
+        await run_turn("hello", llm, make_registry(), harness=harness,
+                       conversation=conversation)
+        await run_turn("again", llm, make_registry(), harness=harness,
+                       conversation=conversation)
+
+        self.assertEqual(llm.messages[0][0],
+                         {"role": "system", "content": "You are a shell agent."})
+        self.assertEqual(llm.messages[0][1]["role"], "user")
+        self.assertEqual([m["role"] for m in conversation.messages].count("system"), 1)
+
+    async def test_iteration_limit_notice_comes_from_harness(self) -> None:
+        notice = "CUSTOM STOP NOTICE."
+        harness = HarnessSpec(prompt=PromptGenome(iteration_limit_notice=notice))
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": '{"location":"Oslo"}'}}]},
+            {"content": "", "tool_calls": [{"id": "2", "function": {
+                "name": "weather", "arguments": '{"location":"Rome"}'}}]},
+            {"content": "summarized", "tool_calls": []},
+        ])
+
+        answer = await run_turn("weather", llm, make_registry(), harness=harness,
+                                max_iterations=2)
+
+        self.assertEqual(answer, "summarized")
+        self.assertEqual(llm.messages[2][-1],
+                         {"role": "user", "content": notice})
+
+    async def test_max_iterations_defaults_to_harness_control_gene(self) -> None:
+        harness = HarnessSpec(control=ControlGenome(max_iterations=1))
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": '{"location":"Oslo"}'}}]},
+            {"content": "summarized", "tool_calls": []},
+        ])
+
+        answer = await run_turn("weather", llm, make_registry(), harness=harness)
+
+        self.assertEqual(answer, "summarized")
+        self.assertEqual(len(llm.messages), 2)
+
+    async def test_recovery_gene_formats_tool_error_observation(self) -> None:
+        async def failing_tool(location: str) -> str:
+            raise RuntimeError("service unavailable")
+
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": '{"location":"Paris"}'}}]},
+            {"content": "fallback", "tool_calls": []},
+        ])
+
+        await run_turn("weather", llm, make_registry(failing_tool))
+
+        observation = llm.messages[1][-1]["content"]
+        self.assertEqual(observation,
+                         "Tool error: service unavailable")
 
 
 if __name__ == "__main__":

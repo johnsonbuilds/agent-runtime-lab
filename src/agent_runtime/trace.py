@@ -9,8 +9,11 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from agent_runtime.harness import HarnessSpec
 
 
 @dataclass(frozen=True)
@@ -33,12 +36,15 @@ class RunTrace:
 
     def __init__(self, run_id: str | None = None,
                  output_path: str | Path | None = None,
-                 sink: Callable[[RunEvent], None] | None = None) -> None:
+                 sink: Callable[[RunEvent], None] | None = None,
+                 harness: "HarnessSpec | None" = None) -> None:
         self.run_id = run_id or f"run-{uuid4().hex}"
         self.events: list[RunEvent] = []
+        self.harness = harness
         self._output_path = Path(output_path) if output_path else None
         self._sink = sink
         self._pending: list[RunEvent] = []
+        self._wrote_harness_header = False
 
     def emit(self, event_type: str, iteration: int = 0,
              **data: Any) -> RunEvent:
@@ -62,6 +68,19 @@ class RunTrace:
     def _write_events(self, events: list[RunEvent]) -> None:
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         with self._output_path.open("a", encoding="utf-8") as stream:
+            if self.harness and not self._wrote_harness_header:
+                # The first JSONL record tags the file with the harness
+                # genome that produced every event below it.
+                header = {
+                    "record_type": "harness",
+                    "run_id": self.run_id,
+                    "harness_id": self.harness.id,
+                    "genes_hash": self.harness.genes_hash,
+                    "harness": self.harness.to_dict(),
+                }
+                stream.write(json.dumps(header, ensure_ascii=True,
+                                        default=str) + "\n")
+                self._wrote_harness_header = True
             for event in events:
                 stream.write(json.dumps(event.to_dict(), ensure_ascii=True,
                                         default=str) + "\n")
