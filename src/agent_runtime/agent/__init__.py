@@ -1,6 +1,7 @@
 """Agent execution logic."""
 
-from .loop import ChatModel, Conversation, run_turn
+from .loop import AgentTurn, ChatModel, Conversation, run_turn, use_streaming
 from agent_runtime.trace import RunEvent, RunTrace
 
-__all__ = ["ChatModel", "Conversation", "RunEvent", "RunTrace", "run_turn"]
+__all__ = ["AgentTurn", "ChatModel", "Conversation", "RunEvent", "RunTrace",
+           "run_turn", "use_streaming"]

@@ -12,7 +12,7 @@ sys.path.insert(0, str(SOURCE_DIR))
 
 from dotenv import load_dotenv
 
-from agent_runtime.agent import Conversation, RunTrace, run_turn
+from agent_runtime.agent import Conversation, RunTrace, run_turn, use_streaming
 from agent_runtime.channels import CLIRenderer
 from agent_runtime.events import EventEmitter
 from agent_runtime.harness import resolve_harness
@@ -46,6 +46,7 @@ async def _run() -> None:
              else RunTrace(harness=harness))
     events = EventEmitter(run_id=trace.run_id)
     events.subscribe(CLIRenderer())
+    use_stream = use_streaming()
     prompt = " ".join(args.prompt).strip()
 
     while True:
@@ -59,7 +60,8 @@ async def _run() -> None:
             break
         if prompt:
             await run_turn(prompt, llm, tools, conversation=conversation,
-                           harness=harness, stream=True, trace=trace, events=events)
+                           harness=harness, stream=use_stream,
+                           trace=trace, events=events)
         prompt = ""
 
 

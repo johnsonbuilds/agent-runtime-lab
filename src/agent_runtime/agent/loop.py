@@ -28,6 +28,12 @@ def _stream_idle_timeout() -> float | None:
     return timeout if timeout > 0 else None
 
 
+def use_streaming() -> bool:
+    """Whether the runtime should consume LLM streaming (AGENT_RUNTIME_STREAM)."""
+    value = os.getenv("AGENT_RUNTIME_STREAM", "1").lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 class ChatModel(Protocol):
     async def chat(self, messages: list[dict[str, Any]],
                     tools: list[dict[str, Any]] | None = None) -> dict[str, Any]: ...
@@ -232,188 +238,231 @@ def _merge_stream_tool_call(calls: list[dict[str, Any]], delta: Mapping[str, Any
             target_function["arguments"] += function["arguments"]
 
 
-async def _consume_stream(llm: ChatModel, messages: list[dict[str, Any]],
-                          tools: list[dict[str, Any]] | None,
-                          trace: RunTrace, iteration: int,
-                          events: EventEmitter) -> dict[str, Any]:
-    """Assemble one response from provider streaming chunks."""
-    content: list[str] = []
-    reasoning: list[str] = []
-    tool_calls: list[dict[str, Any]] = []
-    logger.debug("llm.stream.start iteration=%d", iteration)
-    stream_iterator = llm.stream(messages, tools).__aiter__()
-    while True:
+class AgentTurn:
+    """One agent turn: collaborators and policy bound as attributes.
+
+    ``run`` drives the tool-calling loop; helpers read ``self`` instead
+    of threading a dozen parameters through every call.
+    """
+
+    def __init__(self, user_message: str, llm: ChatModel, tools: ToolExecutor,
+                 max_iterations: int | None = None, *,
+                 harness: HarnessSpec | None = None,
+                 conversation: Conversation | None = None,
+                 stream: bool = False,
+                 trace: RunTrace | None = None,
+                 events: EventEmitter | None = None) -> None:
+        self.harness = harness or default_harness()
+        self.max_iterations = (
+            max_iterations if max_iterations is not None
+            else self.harness.control.max_iterations)
+        self.trace = trace or RunTrace(harness=self.harness)
+        self.events = events or EventEmitter(run_id=self.trace.run_id)
+        self.user_message = user_message
+        self.llm = llm
+        self.tools = tools
+        self.conversation = conversation or Conversation()
+        self.stream = stream
+
+    async def run(self) -> str:
+        """Execute the turn and always flush the trace."""
+        agent_meta: dict[str, Any] = {}
         try:
-            timeout = _stream_idle_timeout()
-            if timeout is None:
-                chunk = await anext(stream_iterator)
-            else:
-                async with asyncio.timeout(timeout):
-                    chunk = await anext(stream_iterator)
-        except StopAsyncIteration:
-            break
-        except TimeoutError as exc:
-            logger.error("llm.stream.timeout iteration=%d timeout_seconds=%s",
-                         iteration, timeout)
-            raise RuntimeError(
-                f"LLM stream produced no chunk for {timeout:g} seconds"
-            ) from exc
-        if not isinstance(chunk, Mapping):
-            raise TypeError("LLM stream chunks must be objects")
-        text = chunk.get("content") or ""
-        if text:
-            content.append(str(text))
-        reasoning_text = chunk.get("reasoning_content") or ""
-        if reasoning_text:
-            reasoning.append(str(reasoning_text))
-        for delta in chunk.get("tool_calls") or []:
-            if not isinstance(delta, Mapping):
-                raise TypeError("LLM tool call chunks must be objects")
-            _merge_stream_tool_call(tool_calls, delta)
-        if text or reasoning_text:
-            events.emit("assistant.delta", iteration,
-                        content=text, reasoning=reasoning_text)
-        logger.debug("llm.chunk iteration=%d content=%r reasoning=%r tool_calls=%r",
-                     iteration, text, reasoning_text, chunk.get("tool_calls") or [])
-        trace.emit("llm.chunk", iteration,
-                   content=text, tool_call_count=len(chunk.get("tool_calls") or []),
-                   reasoning_chars=len(reasoning_text))
-    logger.debug("llm.stream.end iteration=%d", iteration)
-    response = {"content": "".join(content), "tool_calls": tool_calls}
-    if reasoning:
-        response["reasoning_content"] = "".join(reasoning)
-    return response
+            with self.trace.span("agent") as agent_meta:
+                return await self._run(agent_meta)
+        except _TurnFailure as exc:
+            self.events.emit("runtime.error",
+                             stage=agent_meta.get("stage", "agent"),
+                             error=str(exc))
+            return str(exc)
+        except Exception as exc:
+            self.events.emit("runtime.error",
+                             stage=agent_meta.get("stage", "agent"),
+                             error=f"{type(exc).__name__}: {exc}")
+            raise
+        finally:
+            await self.trace.flush()
 
+    async def _run(self, agent_meta: dict[str, Any]) -> str:
+        events, trace = self.events, self.trace
+        tools, harness = self.tools, self.harness
+        messages = self.conversation.messages
 
-async def _chat_response(llm: ChatModel, messages: list[dict[str, Any]],
-                         tools: list[dict[str, Any]] | None,
-                         trace: RunTrace, iteration: int,
-                         use_stream: bool, events: EventEmitter) -> dict[str, Any]:
-    """Consume either runtime streaming or a single runtime response."""
-    events.emit("assistant.started", iteration)
-    if not use_stream:
-        chat = llm.chat
-        response = await chat(messages, tools)
-        content = response.get("content") or ""
-        reasoning = response.get("reasoning_content") or ""
-        if content or reasoning:
-            events.emit("assistant.delta", iteration,
-                        content=content, reasoning=reasoning)
-    else:
-        response = await _consume_stream(llm, messages, tools, trace, iteration, events)
-    events.emit("assistant.completed", iteration,
-                tool_calls=[_tool_trace_metadata(call).get("tool")
-                            for call in response.get("tool_calls") or []])
-    return response
+        events.emit("agent.started", message=self.user_message)
+        _ensure_system_prompt(self.conversation, harness.prompt.system)
+        self.conversation.append({"role": "user", "content": self.user_message})
 
-
-async def _run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
-               max_iterations: int, harness: HarnessSpec,
-               conversation: Conversation | None,
-               trace: RunTrace, agent_meta: dict[str, Any],
-               use_stream: bool, events: EventEmitter) -> str:
-    conversation = conversation or Conversation()
-    events.emit("agent.started", message=user_message)
-    _ensure_system_prompt(conversation, harness.prompt.system)
-    conversation.append({"role": "user", "content": user_message})
-    messages = conversation.messages
-
-    for iteration in range(1, max_iterations + 1):
-        try:
-            logger.debug(
-                "llm.request.start iteration=%d messages=%d tools=%d stream=%s",
-                iteration, len(messages), len(tools.schemas), use_stream)
-            with trace.span("llm", iteration,
-                            message_count=len(messages),
-                            tool_count=len(tools.schemas)) as span_meta:
-                response = await _chat_response(llm, messages, tools.schemas, trace,
-                                                iteration, use_stream, events)
-                tool_calls = response.get("tool_calls") or []
-                content = response.get("content") or ""
-
-                span_meta.update(
-                    tool_count=len(tool_calls),
-                    tools=[_tool_trace_metadata(call).get("tool") for call in tool_calls],
-                    final=not tool_calls,
-                )
+        for iteration in range(1, self.max_iterations + 1):
+            try:
                 logger.debug(
-                    "llm.request.end iteration=%d content_chars=%d tool_calls=%s",
-                    iteration, len(content),
-                    [_tool_trace_metadata(call).get("tool") for call in tool_calls])
+                    "llm.request.start iteration=%d messages=%d tools=%d stream=%s",
+                    iteration, len(messages), len(tools.schemas), self.stream)
+                with trace.span("llm", iteration,
+                                message_count=len(messages),
+                                tool_count=len(tools.schemas)) as span_meta:
+                    response = await self._chat_response(
+                        messages, tools.schemas, iteration)
+                    tool_calls = response.get("tool_calls") or []
+                    content = response.get("content") or ""
+
+                    span_meta.update(
+                        tool_count=len(tool_calls),
+                        tools=[_tool_trace_metadata(call).get("tool")
+                               for call in tool_calls],
+                        final=not tool_calls,
+                    )
+                    logger.debug(
+                        "llm.request.end iteration=%d content_chars=%d tool_calls=%s",
+                        iteration, len(content),
+                        [_tool_trace_metadata(call).get("tool") for call in tool_calls])
+            except Exception as exc:
+                logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
+                error = f"LLM error: {exc}"
+                agent_meta.update(stage="llm", error=error)
+                raise _TurnFailure(error) from exc
+
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": response.get("content") or "",
+            }
+            reasoning_content = response.get("reasoning_content")
+            if reasoning_content:
+                assistant_message["reasoning_content"] = reasoning_content
+            if tool_calls:
+                assistant_message["tool_calls"] = tool_calls
+            messages.append(assistant_message)
+
+            if not tool_calls:
+                answer = response.get("content", "")
+                logger.debug("agent.final iteration=%d answer_chars=%d",
+                             iteration, len(answer))
+                events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
+                return answer
+            for tool_call in tool_calls:
+                tool_meta = _tool_trace_metadata(tool_call)
+                logger.debug("tool.dispatch iteration=%d tool=%r tool_call_id=%r",
+                             iteration, tool_meta.get("tool"),
+                             tool_meta.get("tool_call_id"))
+                payload = _tool_call_payload(tool_call)
+                events.emit("tool.started", iteration, call_id=payload["call_id"],
+                            tool=payload["tool"], arguments=payload["arguments"])
+                tool_started = time.monotonic()
+                try:
+                    with trace.span("tool", iteration, **tool_meta) as span_meta:
+                        validated = validate_tool_call(tool_call, tools.schemas)
+                        result = await tools.execute(validated.name,
+                                                     validated.arguments)
+                        span_meta.update(tool=validated.name,
+                                         tool_call_id=validated.id)
+                    logger.debug(
+                        "tool.result iteration=%d tool=%r result_chars=%d",
+                        iteration, validated.name, len(str(result)))
+                    events.emit("tool.completed", iteration, call_id=payload["call_id"],
+                                duration=round(time.monotonic() - tool_started, 3),
+                                **_tool_result_summary(result))
+                except Exception as exc:
+                    logger.error("tool.error iteration=%d tool=%r error=%s",
+                                 iteration, tool_meta.get("tool"), exc)
+                    events.emit("tool.failed", iteration, call_id=payload["call_id"],
+                                tool=payload["tool"], error=str(exc))
+                    observation = harness.tool_error_observation(
+                        exc, tool=payload["tool"])
+                    _append_tool_observation(messages, tool_call, observation)
+                    continue
+                _append_tool_observation(messages, tool_call, str(result))
+
+        messages.append({"role": "user", "content":
+                         harness.prompt.iteration_limit_notice})
+        iteration = self.max_iterations + 1
+        try:
+            logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
+                         iteration, len(messages), self.stream)
+            with trace.span("llm", iteration,
+                            message_count=len(messages), tool_count=0) as span_meta:
+                response = await self._chat_response(messages, None, iteration)
+                span_meta.update(tool_count=0, tools=[], final=True)
+                logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",
+                             iteration, len(response.get("content") or ""))
         except Exception as exc:
             logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
             error = f"LLM error: {exc}"
             agent_meta.update(stage="llm", error=error)
             raise _TurnFailure(error) from exc
+        answer = response.get("content", "")
+        logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
+        events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
+        return answer
 
-        assistant_message: dict[str, Any] = {
-            "role": "assistant",
-            "content": response.get("content") or "",
-        }
-        reasoning_content = response.get("reasoning_content")
-        if reasoning_content:
-            assistant_message["reasoning_content"] = reasoning_content
-        if tool_calls:
-            assistant_message["tool_calls"] = tool_calls
-        messages.append(assistant_message)
+    async def _chat_response(self, messages: list[dict[str, Any]],
+                             tools: list[dict[str, Any]] | None,
+                             iteration: int) -> dict[str, Any]:
+        """Consume either runtime streaming or a single runtime response."""
+        self.events.emit("assistant.started", iteration)
+        if not self.stream:
+            chat = self.llm.chat
+            response = await chat(messages, tools)
+            content = response.get("content") or ""
+            reasoning = response.get("reasoning_content") or ""
+            if content or reasoning:
+                self.events.emit("assistant.delta", iteration,
+                                 content=content, reasoning=reasoning)
+        else:
+            response = await self._consume_stream(messages, tools, iteration)
+        self.events.emit("assistant.completed", iteration,
+                         tool_calls=[_tool_trace_metadata(call).get("tool")
+                                     for call in response.get("tool_calls") or []])
+        return response
 
-        if not tool_calls:
-            answer = response.get("content", "")
-            logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
-            events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
-            return answer
-        for tool_call in tool_calls:
-            tool_meta = _tool_trace_metadata(tool_call)
-            logger.debug("tool.dispatch iteration=%d tool=%r tool_call_id=%r",
-                         iteration, tool_meta.get("tool"), tool_meta.get("tool_call_id"))
-            payload = _tool_call_payload(tool_call)
-            events.emit("tool.started", iteration, call_id=payload["call_id"],
-                        tool=payload["tool"], arguments=payload["arguments"])
-            tool_started = time.monotonic()
+    async def _consume_stream(self, messages: list[dict[str, Any]],
+                              tools: list[dict[str, Any]] | None,
+                              iteration: int) -> dict[str, Any]:
+        """Assemble one response from provider streaming chunks."""
+        content: list[str] = []
+        reasoning: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        logger.debug("llm.stream.start iteration=%d", iteration)
+        stream_iterator = self.llm.stream(messages, tools).__aiter__()
+        while True:
             try:
-                with trace.span("tool", iteration, **tool_meta) as span_meta:
-                    validated = validate_tool_call(tool_call, tools.schemas)
-                    result = await tools.execute(validated.name, validated.arguments)
-                    span_meta.update(tool=validated.name, tool_call_id=validated.id)
-                logger.debug(
-                    "tool.result iteration=%d tool=%r result_chars=%d",
-                    iteration, validated.name, len(str(result)))
-                events.emit("tool.completed", iteration, call_id=payload["call_id"],
-                            duration=round(time.monotonic() - tool_started, 3),
-                            **_tool_result_summary(result))
-            except Exception as exc:
-                logger.error("tool.error iteration=%d tool=%r error=%s",
-                             iteration, tool_meta.get("tool"), exc)
-                events.emit("tool.failed", iteration, call_id=payload["call_id"],
-                            tool=payload["tool"], error=str(exc))
-                observation = harness.tool_error_observation(
-                    exc, tool=payload["tool"])
-                _append_tool_observation(messages, tool_call, observation)
-                continue
-            _append_tool_observation(messages, tool_call, str(result))
-
-    messages.append({"role": "user", "content":
-                     harness.prompt.iteration_limit_notice})
-    iteration = max_iterations + 1
-    try:
-        logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
-                      iteration, len(messages), use_stream)
-        with trace.span("llm", iteration,
-                        message_count=len(messages), tool_count=0) as span_meta:
-            response = await _chat_response(llm, messages, None, trace, iteration,
-                                            use_stream, events)
-            span_meta.update(tool_count=0, tools=[], final=True)
-            logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",
-                         iteration, len(response.get("content") or ""))
-    except Exception as exc:
-        logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
-        error = f"LLM error: {exc}"
-        agent_meta.update(stage="llm", error=error)
-        raise _TurnFailure(error) from exc
-    answer = response.get("content", "")
-    logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
-    events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
-    return answer
+                timeout = _stream_idle_timeout()
+                if timeout is None:
+                    chunk = await anext(stream_iterator)
+                else:
+                    async with asyncio.timeout(timeout):
+                        chunk = await anext(stream_iterator)
+            except StopAsyncIteration:
+                break
+            except TimeoutError as exc:
+                logger.error("llm.stream.timeout iteration=%d timeout_seconds=%s",
+                             iteration, timeout)
+                raise RuntimeError(
+                    f"LLM stream produced no chunk for {timeout:g} seconds"
+                ) from exc
+            if not isinstance(chunk, Mapping):
+                raise TypeError("LLM stream chunks must be objects")
+            text = chunk.get("content") or ""
+            if text:
+                content.append(str(text))
+            reasoning_text = chunk.get("reasoning_content") or ""
+            if reasoning_text:
+                reasoning.append(str(reasoning_text))
+            for delta in chunk.get("tool_calls") or []:
+                if not isinstance(delta, Mapping):
+                    raise TypeError("LLM tool call chunks must be objects")
+                _merge_stream_tool_call(tool_calls, delta)
+            if text or reasoning_text:
+                self.events.emit("assistant.delta", iteration,
+                                 content=text, reasoning=reasoning_text)
+            logger.debug("llm.chunk iteration=%d content=%r reasoning=%r tool_calls=%r",
+                         iteration, text, reasoning_text, chunk.get("tool_calls") or [])
+            self.trace.emit("llm.chunk", iteration,
+                            content=text, tool_call_count=len(chunk.get("tool_calls") or []),
+                            reasoning_chars=len(reasoning_text))
+        logger.debug("llm.stream.end iteration=%d", iteration)
+        response = {"content": "".join(content), "tool_calls": tool_calls}
+        if reasoning:
+            response["reasoning_content"] = "".join(reasoning)
+        return response
 
 
 async def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
@@ -425,26 +474,10 @@ async def run_turn(user_message: str, llm: ChatModel, tools: ToolExecutor,
                events: EventEmitter | None = None) -> str:
     """Run one agent turn under the given harness.
 
-    ``max_iterations`` explicitly overrides ``harness.control``; the
-    harness is otherwise the source of truth for how the agent behaves.
+    Convenience wrapper around :class:`AgentTurn`.  ``max_iterations``
+    explicitly overrides ``harness.control``; the harness is otherwise
+    the source of truth for how the agent behaves.
     """
-    harness = harness or default_harness()
-    iterations = (max_iterations if max_iterations is not None
-                  else harness.control.max_iterations)
-    trace = trace or RunTrace(harness=harness)
-    events = events or EventEmitter(run_id=trace.run_id)
-    agent_meta: dict[str, Any] = {}
-    try:
-        with trace.span("agent") as agent_meta:
-            return await _run_turn(user_message, llm, tools, iterations, harness,
-                                   conversation, trace, agent_meta, stream, events)
-    except _TurnFailure as exc:
-        events.emit("runtime.error", stage=agent_meta.get("stage", "agent"),
-                    error=str(exc))
-        return str(exc)
-    except Exception as exc:
-        events.emit("runtime.error", stage=agent_meta.get("stage", "agent"),
-                    error=f"{type(exc).__name__}: {exc}")
-        raise
-    finally:
-        await trace.flush()
+    return await AgentTurn(user_message, llm, tools, max_iterations,
+                           harness=harness, conversation=conversation,
+                           stream=stream, trace=trace, events=events).run()

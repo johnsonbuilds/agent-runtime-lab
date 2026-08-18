@@ -12,7 +12,7 @@ from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from agent_runtime.agent import run_turn
+from agent_runtime.agent import run_turn, use_streaming
 from agent_runtime.execution.harbor import HarborShellExecutor
 from agent_runtime.harness import HarnessSpec, resolve_harness
 from agent_runtime.providers import OpenAICompatibleLLM
@@ -34,11 +34,6 @@ def _enable_runtime_logging() -> None:
         handler.setFormatter(logging.Formatter("[agent-runtime] %(message)s"))
         runtime_logger.addHandler(handler)
     runtime_logger.propagate = False
-
-
-def _use_streaming() -> bool:
-    value = os.getenv("AGENT_RUNTIME_STREAM", "1").lower()
-    return value not in {"0", "false", "no", "off"}
 
 
 class HarborAgent(BaseAgent):
@@ -69,7 +64,7 @@ class HarborAgent(BaseAgent):
         context: AgentContext,
     ) -> None:
         trace_path = self.logs_dir / "agent-runtime.jsonl"
-        use_stream = _use_streaming()
+        use_stream = use_streaming()
         harness: HarnessSpec = resolve_harness(os.getenv("AGENT_RUNTIME_HARNESS"))
         logger.debug("task.start instruction=%r model=%r stream=%s harness=%s",
                      instruction, self.model_name, use_stream, harness.id)

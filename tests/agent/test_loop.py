@@ -2,13 +2,14 @@ import sys
 import json
 import tempfile
 import unittest
+from os import environ
 from pathlib import Path
 from typing import Any
 
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
-from agent_runtime.agent.loop import Conversation, run_turn
+from agent_runtime.agent.loop import AgentTurn, Conversation, run_turn, use_streaming
 from agent_runtime.harness import HarnessSpec, PromptGenome, ControlGenome
 from agent_runtime.trace import RunTrace
 from agent_runtime.tools.tools import ToolRegistry, ToolSpec
@@ -340,6 +341,72 @@ class HarnessIntegrationTests(unittest.IsolatedAsyncioTestCase):
         observation = llm.messages[1][-1]["content"]
         self.assertEqual(observation,
                          "Tool error: service unavailable")
+
+
+class StreamingConfigTests(unittest.TestCase):
+    def test_use_streaming_defaults_to_on(self) -> None:
+        previous = environ.pop("AGENT_RUNTIME_STREAM", None)
+        try:
+            self.assertTrue(use_streaming())
+        finally:
+            if previous is not None:
+                environ["AGENT_RUNTIME_STREAM"] = previous
+
+    def test_use_streaming_reads_env(self) -> None:
+        previous = environ.get("AGENT_RUNTIME_STREAM")
+        try:
+            for raw, expected in [("0", False), ("false", False), ("off", False),
+                                  ("1", True), ("yes", True)]:
+                environ["AGENT_RUNTIME_STREAM"] = raw
+                self.assertIs(use_streaming(), expected)
+        finally:
+            if previous is None:
+                environ.pop("AGENT_RUNTIME_STREAM", None)
+            else:
+                environ["AGENT_RUNTIME_STREAM"] = previous
+
+
+class AgentTurnClassTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_class_run_matches_run_turn_behavior(self) -> None:
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": '{"location":"Singapore"}'}}]},
+            {"content": "It is sunny", "tool_calls": []},
+        ])
+        trace = RunTrace(run_id="r-turn")
+
+        answer = await AgentTurn("weather", llm, make_registry(),
+                                 trace=trace).run()
+
+        self.assertEqual(answer, "It is sunny")
+        self.assertEqual(
+            [event.event_type for event in trace.events],
+            ["agent.start", "llm.start", "llm.end", "tool.start", "tool.end",
+             "llm.start", "llm.end", "agent.end"],
+        )
+
+    async def test_class_attributes_bind_harness_defaults(self) -> None:
+        llm = FakeLLM([{"content": "hi", "tool_calls": []}])
+        turn = AgentTurn("hello", llm, make_registry())
+
+        self.assertEqual(turn.max_iterations, turn.harness.control.max_iterations)
+        self.assertIs(turn.trace.harness, turn.harness)
+        self.assertIs(turn.events.run_id, turn.trace.run_id)
+        await turn.run()
+
+    async def test_class_attributes_honor_overrides(self) -> None:
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": '{"location":"Oslo"}'}}]},
+            {"content": "summarized", "tool_calls": []},
+        ])
+        harness = HarnessSpec(control=ControlGenome(max_iterations=1))
+
+        answer = await AgentTurn("weather", llm, make_registry(),
+                                 harness=harness).run()
+
+        self.assertEqual(answer, "summarized")
+        self.assertEqual(len(llm.messages), 2)
 
 
 if __name__ == "__main__":
