@@ -1,0 +1,30 @@
+{
+  "record_id": "2026-08-18__19-34-37__baseline-v0__terminal-bench-2",
+  "created_at": "2026-08-18T20:06:06",
+  "harness_id": "baseline-v0",
+  "genes_hash": "b6bc636c51d80d60",
+  "model": "deepseek-v4-flash",
+  "benchmark": "terminal-bench/terminal-bench-2",
+  "job_dir": "jobs/2026-08-18__19-34-37",
+  "git_commit": "b39370c",
+  "score": {
+    "passed": 0,
+    "failed": 1,
+    "errored": 0,
+    "cancelled": 0,
+    "unjudged_completed": 0,
+    "total": 1,
+    "rate": 0.0
+  },
+  "tasks": [
+    {
+      "task": "terminal-bench/fix-git",
+      "trial": "fix-git__8MUoxRX",
+      "status": "failed",
+      "reward": 0.0,
+      "trace": "jobs/2026-08-18__19-34-37/fix-git__8MUoxRX/agent/agent-runtime.jsonl",
+      "failure_mode": "false-success"
+    }
+  ],
+  "notes": null
+}
