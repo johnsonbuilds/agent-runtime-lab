@@ -13,7 +13,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from agent_runtime.agent import run_turn, use_streaming
-from agent_runtime.execution.harbor import HarborShellExecutor
+from agent_runtime.execution.harbor import HarborShellExecutor, HarborWorkspace
 from agent_runtime.harness import HarnessSpec, resolve_harness
 from agent_runtime.providers import OpenAICompatibleLLM
 from agent_runtime.tools import create_default_registry
@@ -82,7 +82,8 @@ class HarborAgent(BaseAgent):
 
         trace = RunTrace(output_path=trace_path, sink=record_event, harness=harness)
         tools = create_default_registry(HarborShellExecutor(environment),
-                                        enabled=list(harness.tools.enabled))
+                                        enabled=list(harness.tools.enabled),
+                                        workspace=HarborWorkspace(environment))
         runtime_metadata["status"] = "running"
         sync_context()
 

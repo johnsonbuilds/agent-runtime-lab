@@ -1,0 +1,36 @@
+# Harness genome: describes HOW this agent works, as versioned data.
+# Derived from baseline-v0 by enabling the file meta-tools, one gene at
+# a time (tools.enabled is the only change vs the parent).
+
+id: files-v1
+parent: baseline-v0
+mutation: enable file meta-tools (write_file, read_file, list_dir, edit_file)
+reason: measure what structured file tools add over the shell-only baseline
+
+prompt:
+  system: ""
+  iteration_limit_notice: >-
+    Iteration limit reached. Summarize the progress and give the best
+    possible final answer. Do not call tools.
+
+tools:
+  enabled:
+    - run_command
+    - write_file
+    - read_file
+    - list_dir
+    - edit_file
+
+control:
+  max_iterations: 10
+
+memory:
+  strategy: full_history
+
+recovery:
+  tool_error: feed_error_and_continue
+
+verification:
+  enabled: false
+
+skills: []

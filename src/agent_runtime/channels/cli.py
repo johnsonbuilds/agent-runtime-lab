@@ -131,9 +131,21 @@ class CLIRenderer:
     @staticmethod
     def _format_arguments(event: AgentEvent) -> str:
         arguments = event.data.get("arguments")
-        if (event.data.get("tool") == "run_command" and isinstance(arguments, dict)
+        tool = event.data.get("tool")
+        if (tool == "run_command" and isinstance(arguments, dict)
                 and isinstance(arguments.get("command"), str)):
             return f"$ {arguments['command']}"
+        if (tool == "execute_code" and isinstance(arguments, dict)
+                and isinstance(arguments.get("code"), str)):
+            language = arguments.get("language") or "python"
+            first_line = next((line.strip() for line in arguments["code"].splitlines()
+                               if line.strip()), "")
+            preview = first_line if len(first_line) <= 80 else first_line[:79] + "…"
+            return f"$ {language} · {preview}"
+        if (tool == "write_file" and isinstance(arguments, dict)):
+            content = arguments.get("content")
+            size = len(content) if isinstance(content, str) else 0
+            return f"write {arguments.get('path')} ({size} chars)"
         if arguments is None:
             return ""
         return json.dumps(arguments, ensure_ascii=False, sort_keys=True)

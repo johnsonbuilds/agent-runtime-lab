@@ -92,6 +92,33 @@ class CLIRendererTests(unittest.TestCase):
                          "  │ Singapore\n"
                          "  ✓ done · 0.2s\n")
 
+    def test_execute_code_tool_renders_language_and_first_line(self) -> None:
+        output = render([
+            event("tool.started", {"tool": "execute_code",
+                                  "arguments": {"code": "\nimport os\nprint(os.getcwd())",
+                                                "language": "python"}}),
+            event("tool.completed", {"exit_code": 0, "duration": 0.5,
+                                     "stdout_tail": "/workspace", "stderr_tail": ""}),
+        ])
+        self.assertEqual(output,
+                         "● execute_code\n"
+                         "  $ python · import os\n"
+                         "  │ /workspace\n"
+                         "  ✓ exit 0 · 0.5s\n")
+
+    def test_write_file_tool_renders_path_and_size(self) -> None:
+        output = render([
+            event("tool.started", {"tool": "write_file",
+                                  "arguments": {"path": "a.py", "content": "x = 1\n"}}),
+            event("tool.completed", {"result": "{'path': 'a.py', 'bytes_written': 6}",
+                                     "duration": 0.1}),
+        ])
+        self.assertEqual(output,
+                         "● write_file\n"
+                         "  write a.py (6 chars)\n"
+                         "  │ {'path': 'a.py', 'bytes_written': 6}\n"
+                         "  ✓ done · 0.1s\n")
+
     def test_tool_failed_renders_error(self) -> None:
         output = render([
             event("tool.started", {"tool": "weather", "arguments": {"location": 1}}),
