@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import paginate_lines
+from .guard import CommandGuard, GuardDecision, guard_from_env
 
 
 def _text(value: Any) -> str:
@@ -32,7 +33,17 @@ def _error_result(started: float, exc: BaseException,
 
 
 class LocalShellExecutor:
-    """Execute shell commands in the current Python process environment."""
+    """Execute shell commands in the current Python process environment.
+
+    Commands pass through a :class:`CommandGuard` first (policy from
+    ``AGENT_RUNTIME_COMMAND_GUARD``, default ``blocklist``); a blocked
+    command returns a structured ``CommandBlocked`` error instead of
+    running.  The guard is fool-proofing against destructive mistakes,
+    not a security boundary — see :mod:`agent_runtime.execution.guard`.
+    """
+
+    def __init__(self, guard: CommandGuard | None = None) -> None:
+        self.guard = guard if guard is not None else guard_from_env()
 
     async def execute(
         self,
@@ -40,6 +51,17 @@ class LocalShellExecutor:
         cwd: str | None = None,
         timeout: float | None = 30.0,
     ) -> dict[str, Any]:
+        decision = self.guard.check(command)
+        if not decision.allowed:
+            started = time.monotonic()
+            return {
+                "stdout": "",
+                "stderr": "",
+                "exit_code": None,
+                "duration": time.monotonic() - started,
+                "error": {"type": "CommandBlocked",
+                          "message": decision.reason or "command blocked"},
+            }
         return await asyncio.to_thread(self._execute, command, cwd, timeout)
 
     def _execute(

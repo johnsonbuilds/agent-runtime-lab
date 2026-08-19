@@ -18,9 +18,9 @@ import re
 import shlex
 from pathlib import PurePosixPath
 from typing import Any
-
 from agent_runtime.execution.base import ShellExecutor, Workspace
 from agent_runtime.execution.local import LocalShellExecutor, LocalWorkspace
+from agent_runtime.execution.guard import GuardDecision
 
 
 LANGUAGES = {"python": "py", "bash": "sh"}
@@ -63,6 +63,31 @@ def _run_command_for(language: str, script: str) -> str:
     return f"bash {shlex.quote(script)}"
 
 
+def _guard_decision(executor: ShellExecutor, script: str,
+                    language: str) -> GuardDecision | None:
+    """Check the script's own text against the executor's guard.
+
+    Only bash scripts are checked, line by line: the wrapper command
+    (``bash .scripts/0001.sh``) is always harmless, so what needs
+    vetting is the script content.  Python is not textually guarded —
+    it is Turing-complete, so any check on its source is trivially
+    bypassed and would also block legitimate file work; the real
+    boundary for code is the execution environment (container vs
+    local).
+    """
+    guard = getattr(executor, "guard", None)
+    if guard is None or language != "bash":
+        return None
+    for line in script.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        decision = guard.check(stripped)
+        if not decision.allowed:
+            return decision
+    return None
+
+
 async def execute_code(code: str, language: str = "python",
                        path: str | None = None, timeout: float | None = DEFAULT_TIMEOUT,
                        *, workspace: Workspace | None = None,
@@ -86,8 +111,15 @@ async def execute_code(code: str, language: str = "python",
         return {**written, "script_path": script, "language": language}
 
     cwd = str(ws.root) if ws.root is not None else None
-    result = await ex.execute(_run_command_for(language, script), cwd=cwd,
-                              timeout=timeout)
+    command = _run_command_for(language, script)
+    decision = _guard_decision(ex, code, language)
+    if decision is not None and not decision.allowed:
+        return {"stdout": "", "stderr": "", "exit_code": None,
+                "duration": 0.0,
+                "error": {"type": "CommandBlocked",
+                          "message": decision.reason or "command blocked"},
+                "script_path": script, "language": language}
+    result = await ex.execute(command, cwd=cwd, timeout=timeout)
 
     stdout: str = result.get("stdout") or ""
     if len(stdout) > _max_output_chars():
