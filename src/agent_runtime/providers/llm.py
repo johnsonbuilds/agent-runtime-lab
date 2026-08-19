@@ -14,7 +14,8 @@ class OpenAICompatibleLLM:
             from openai import AsyncOpenAI
         except ImportError as exc:
             raise RuntimeError("Install the openai package to use this provider") from exc
-        self.model = model or os.getenv("MODEL_ID", "gpt-4o-mini")
+        self.model = model or os.getenv("MODEL_ID", "glm-5.3")
+        self.temperature = float(os.getenv("LLM_TEMPERATURE", 0.0))
         self.client = AsyncOpenAI(api_key=api_key or os.getenv("LLM_API_KEY"),
                                   base_url=base_url or os.getenv("LLM_BASE_URL"),
                                   **client_kwargs)
@@ -22,7 +23,8 @@ class OpenAICompatibleLLM:
     async def chat(self, messages: Sequence[dict[str, Any]],
                    tools: list[dict[str, Any]] | None = None,
                    **request_kwargs: Any) -> dict[str, Any]:
-        kwargs = {"model": self.model, "messages": list(messages), **request_kwargs}
+        kwargs = {"model": self.model, "messages": list(messages),
+                  "temperature": self.temperature, **request_kwargs}
         if tools is not None:
             kwargs["tools"] = tools
         response = await self.client.chat.completions.create(**kwargs)
@@ -39,7 +41,7 @@ class OpenAICompatibleLLM:
                      **request_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
         """Yield provider-independent content and tool-call deltas."""
         kwargs = {"model": self.model, "messages": list(messages),
-                  "stream": True, **request_kwargs}
+                  "stream": True, "temperature": self.temperature, **request_kwargs}
         if tools is not None:
             kwargs["tools"] = tools
         response = await self.client.chat.completions.create(**kwargs)
