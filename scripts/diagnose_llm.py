@@ -47,8 +47,8 @@ async def timed(name, factory, budget=75.0):
 async def main():
     from openai import AsyncOpenAI
     client = AsyncOpenAI()
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    print(f"base_url={os.getenv('OPENAI_BASE_URL')} model={model}", flush=True)
+    model = os.getenv("MODEL_ID", "gpt-4o-mini")
+    print(f"base_url={os.getenv('LLM_BASE_URL')} model={model}", flush=True)
 
     async def t1():
         r = await client.chat.completions.create(

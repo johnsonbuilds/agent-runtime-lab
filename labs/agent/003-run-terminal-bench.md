@@ -32,9 +32,9 @@ harbor --help
 Configure the OpenAI-compatible provider in the project root `.env`:
 
 ```dotenv
-OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://your-compatible-provider.example/v1
-OPENAI_MODEL=your-model
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=https://your-compatible-provider.example/v1
+MODEL_ID=your-model
 ```
 
 The Harbor adapter loads `.env` before creating the default LLM. Do not commit
@@ -140,12 +140,12 @@ uv pip install -e .
 ### Missing OpenAI credentials
 
 Check that `.env` exists in the project root and contains a real
-`OPENAI_API_KEY`. Alternatively export the variables before running Harbor:
+`LLM_API_KEY`. Alternatively export the variables before running Harbor:
 
 ```bash
-export OPENAI_API_KEY="..."
-export OPENAI_BASE_URL="https://your-compatible-provider.example/v1"
-export OPENAI_MODEL="your-model"
+export LLM_API_KEY="..."
+export LLM_BASE_URL="https://your-compatible-provider.example/v1"
+export MODEL_ID="your-model"
 ```
 
 ### The trial appears to run for a long time

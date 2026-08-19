@@ -198,9 +198,9 @@ can be added through the yielded metadata dictionary.
 The project uses an OpenAI-compatible Chat Completions API:
 
 ```dotenv
-OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://api.example.com/v1
-OPENAI_MODEL=your-model
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=https://api.example.com/v1
+MODEL_ID=your-model
 
 ```
 

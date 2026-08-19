@@ -162,7 +162,7 @@ Behavior:
 
 ```bash
 # setup
-cp .env.example .env     # fill in OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL
+cp .env.example .env     # fill in LLM_API_KEY / LLM_BASE_URL / MODEL_ID
 
 # one-shot
 uv run python run_agent.py "运行 ls -la 并告诉我当前目录有什么"

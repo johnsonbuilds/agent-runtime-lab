@@ -17,9 +17,9 @@ Requires Python 3.12+, `uv`, and an OpenAI-compatible API key. Configure the
 provider in `.env`:
 
 ```dotenv
-OPENAI_API_KEY=your-api-key
-OPENAI_MODEL=gpt-4o-mini
-# OPENAI_BASE_URL=https://your-compatible-provider.example/v1
+LLM_API_KEY=your-api-key
+MODEL_ID=gpt-4o-mini
+# LLM_BASE_URL=https://your-compatible-provider.example/v1
 ```
 
 Install dependencies if needed:
