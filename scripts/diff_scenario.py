@@ -56,7 +56,7 @@ async def main(output: str) -> None:
         {"content": "fallback", "tool_calls": []},
     ]
     iteration_answers = [{"content": "", "tool_calls": [{"id": "2", "function": {
-        "name": "weather", "arguments": '{"location":"Tokyo"}'}}]}}] * 3
+        "name": "weather", "arguments": '{"location":"Tokyo"}'}}]}] * 3
     iteration_answers.append({"content": "summarized", "tool_calls": []})
     llm = ScriptedLLM(final_answers + iteration_answers)
     conversation = Conversation()
