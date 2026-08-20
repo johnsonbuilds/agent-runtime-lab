@@ -8,6 +8,8 @@ dependencies = [
     "openai>=1.0.0",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0.3",
+    "tree-sitter>=0.26.0",
+    "tree-sitter-python>=0.25.0",
 ]
 
 [project.scripts]

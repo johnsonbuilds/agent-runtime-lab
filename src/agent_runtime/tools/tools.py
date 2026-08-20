@@ -13,7 +13,11 @@ from agent_runtime.execution.local import LocalShellExecutor, LocalWorkspace
 
 from .code import execute_code
 from .files import DEFAULT_READ_LIMIT, edit_file, list_dir, read_file, write_file
+from .patch import apply_patch
+from .search import DEFAULT_GREP_RESULTS, DEFAULT_GLOB_RESULTS, glob_files, grep_search
 from .shell import run_command
+from .symbols import TreeSitterIndex, find_references, find_symbol
+from .todo import STATUSES, todo_write
 
 
 @dataclass(frozen=True)
@@ -125,6 +129,117 @@ def _edit_file_spec(workspace: Workspace) -> ToolSpec:
                     partial(edit_file, workspace=workspace))
 
 
+def _apply_patch_spec(workspace: Workspace) -> ToolSpec:
+    return ToolSpec("apply_patch",
+                    "Apply several precise edits in one all-or-nothing "
+                    "patch. Format per edit: a line with the file path, then "
+                    "'<<<<<<< SEARCH', the exact original text, '=======', "
+                    "the replacement text, '>>>>>>> REPLACE'. Multiple edits "
+                    "per file apply in order and multiple files are allowed. "
+                    "An empty SEARCH section creates a new file with the "
+                    "REPLACE text as content. Every SEARCH text must match "
+                    "exactly once or nothing is written.",
+                    {"type": "object", "properties": {
+                        "patch": {"type": "string",
+                                  "description": "The full patch text"}},
+                     "required": ["patch"]},
+                    partial(apply_patch, workspace=workspace))
+
+
+def _grep_search_spec(workspace: Workspace) -> ToolSpec:
+    return ToolSpec("grep_search",
+                    "Search file contents line by line with a regular "
+                    "expression and return structured matches "
+                    "(path, line, preview) whose line numbers feed "
+                    "read_file(offset=...). Junk directories (.git, "
+                    "node_modules, ...) are skipped automatically; output "
+                    "is capped with a truncated flag.",
+                    {"type": "object", "properties": {
+                        "pattern": {"type": "string",
+                                    "description": "Regular expression "
+                                                   "(Python re syntax)"},
+                        "path": {"type": "string",
+                                 "description": "Directory to search",
+                                 "default": "."},
+                        "include": {"type": "string",
+                                    "description": "Glob for file names, "
+                                                   "e.g. '*.py'"},
+                        "ignore_case": {"type": "boolean", "default": False},
+                        "max_results": {"type": "integer",
+                                        "description": "Maximum matches",
+                                        "default": DEFAULT_GREP_RESULTS}},
+                     "required": ["pattern"]},
+                    partial(grep_search, workspace=workspace))
+
+
+def _glob_files_spec(workspace: Workspace) -> ToolSpec:
+    return ToolSpec("glob_files",
+                    "Find files by glob pattern (e.g. '**/*.py' or "
+                    "'userService*'); '*' also matches across directory "
+                    "separators and bare names match anywhere in the tree. "
+                    "One call replaces many list_dir round trips.",
+                    {"type": "object", "properties": {
+                        "pattern": {"type": "string",
+                                    "description": "Glob pattern"},
+                        "path": {"type": "string",
+                                 "description": "Directory to search",
+                                 "default": "."},
+                        "max_results": {"type": "integer",
+                                        "description": "Maximum paths",
+                                        "default": DEFAULT_GLOB_RESULTS}},
+                     "required": ["pattern"]},
+                    partial(glob_files, workspace=workspace))
+
+
+def _find_symbol_spec(index: TreeSitterIndex) -> ToolSpec:
+    return ToolSpec("find_symbol",
+                    "Find where a class or function is defined, using "
+                    "fault-tolerant tree-sitter parsing (works even in "
+                    "files with syntax errors). Matches name or qualified "
+                    "name like 'ClassName.method' and returns "
+                    "(path, line, end_line) for read_file.",
+                    {"type": "object", "properties": {
+                        "name": {"type": "string",
+                                 "description": "Symbol name (short or "
+                                                "qualified)"},
+                        "kind": {"type": "string", "enum": ["class", "function",
+                                                            "method"],
+                                 "description": "Filter by symbol kind"}},
+                     "required": ["name"]},
+                    partial(find_symbol, index=index))
+
+
+def _find_references_spec(index: TreeSitterIndex) -> ToolSpec:
+    return ToolSpec("find_references",
+                    "Find all identifier usages of a name across the "
+                    "workspace (tree-sitter based), excluding its "
+                    "definition sites. Returns (path, line, preview) per "
+                    "reference.",
+                    {"type": "object", "properties": {
+                        "name": {"type": "string",
+                                 "description": "Identifier to look for"}},
+                     "required": ["name"]},
+                    partial(find_references, index=index))
+
+
+def _todo_write_spec(workspace: Workspace) -> ToolSpec:
+    return ToolSpec("todo_write",
+                    f"Create or replace the agent task list. Each call "
+                    f"replaces the whole list (statuses: {', '.join(STATUSES)}; "
+                    "at most one in_progress). Use it to plan multi-step "
+                    "work and keep progress visible across turns.",
+                    {"type": "object", "properties": {
+                        "todos": {"type": "array",
+                                  "description": "The complete new task list",
+                                  "items": {"type": "object", "properties": {
+                                      "content": {"type": "string"},
+                                      "status": {"type": "string",
+                                                 "enum": list(STATUSES)}},
+                                      "required": ["content", "status"]}}},
+                     "required": ["todos"]},
+                    partial(todo_write, workspace=workspace))
+
+
 def _execute_code_spec(executor: ShellExecutor, workspace: Workspace) -> ToolSpec:
     return ToolSpec("execute_code",
                     "Write a complete script to the workspace and execute it "
@@ -156,12 +271,19 @@ def builtin_tool_specs(executor: ShellExecutor | None = None,
     """Every tool the runtime knows how to build."""
     shell_executor = executor if executor is not None else LocalShellExecutor()
     file_workspace = workspace if workspace is not None else LocalWorkspace()
+    symbol_index = TreeSitterIndex(file_workspace)
     return [
         _run_command_spec(shell_executor),
         _write_file_spec(file_workspace),
         _read_file_spec(file_workspace),
         _list_dir_spec(file_workspace),
         _edit_file_spec(file_workspace),
+        _apply_patch_spec(file_workspace),
+        _grep_search_spec(file_workspace),
+        _glob_files_spec(file_workspace),
+        _find_symbol_spec(symbol_index),
+        _find_references_spec(symbol_index),
+        _todo_write_spec(file_workspace),
         _execute_code_spec(shell_executor, file_workspace),
     ]
 

@@ -146,6 +146,25 @@ class CLIRenderer:
             content = arguments.get("content")
             size = len(content) if isinstance(content, str) else 0
             return f"write {arguments.get('path')} ({size} chars)"
+        if (tool == "grep_search" and isinstance(arguments, dict)):
+            pattern = arguments.get("pattern")
+            return f"$ grep {pattern}"
+        if (tool == "glob_files" and isinstance(arguments, dict)):
+            return f"$ glob {arguments.get('pattern')}"
+        if (tool == "find_symbol" and isinstance(arguments, dict)):
+            return f"$ symbol {arguments.get('name')}"
+        if (tool == "find_references" and isinstance(arguments, dict)):
+            return f"$ refs {arguments.get('name')}"
+        if (tool == "todo_write" and isinstance(arguments, dict)
+                and isinstance(arguments.get("todos"), list)):
+            todos = arguments["todos"]
+            done = sum(1 for item in todos
+                       if isinstance(item, dict) and item.get("status") == "completed")
+            return f"todo {len(todos)} items ({done} done)"
+        if (tool == "apply_patch" and isinstance(arguments, dict)
+                and isinstance(arguments.get("patch"), str)):
+            blocks = arguments["patch"].count(">>>>>>> REPLACE")
+            return f"patch: {blocks} edit(s)"
         if arguments is None:
             return ""
         return json.dumps(arguments, ensure_ascii=False, sort_keys=True)

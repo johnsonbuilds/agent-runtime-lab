@@ -11,7 +11,9 @@ from agent_runtime.tools.tools import create_default_registry
 
 
 BUILTIN_TOOLS = ["run_command", "write_file", "read_file", "list_dir",
-                 "edit_file", "execute_code"]
+                 "edit_file", "apply_patch", "grep_search", "glob_files",
+                 "find_symbol", "find_references", "todo_write",
+                 "execute_code"]
 
 
 class DefaultRegistryTests(unittest.TestCase):
