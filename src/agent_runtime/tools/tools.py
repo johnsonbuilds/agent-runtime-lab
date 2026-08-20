@@ -58,16 +58,22 @@ class ToolRegistry:
         return await spec.handler(**dict(arguments))
 
 
-def _run_command_spec(executor: ShellExecutor) -> ToolSpec:
-    return ToolSpec("run_command", "Run a shell command and return its output and exit code.",
+def _run_command_spec(executor: ShellExecutor,
+                      workspace: Workspace | None = None) -> ToolSpec:
+    default_cwd = (str(workspace.root) if workspace is not None
+                   and workspace.root is not None else None)
+    return ToolSpec("run_command",
+                    "Run a shell command and return its output and exit code. "
+                    "Commands run in the workspace root unless cwd is given.",
                     {"type": "object", "properties": {
                         "command": {"type": "string", "description": "Shell command to run"},
                         "cwd": {"type": "string",
-                                "description": "Working directory for the command"},
+                                "description": "Working directory for the command "
+                                               "(defaults to the workspace root)"},
                         "timeout": {"type": "number", "description": "Timeout in seconds",
                                     "default": 30}},
                      "required": ["command"]},
-                    partial(run_command, executor=executor))
+                    partial(run_command, executor=executor, default_cwd=default_cwd))
 
 
 def _write_file_spec(workspace: Workspace) -> ToolSpec:
@@ -273,7 +279,7 @@ def builtin_tool_specs(executor: ShellExecutor | None = None,
     file_workspace = workspace if workspace is not None else LocalWorkspace()
     symbol_index = TreeSitterIndex(file_workspace)
     return [
-        _run_command_spec(shell_executor),
+        _run_command_spec(shell_executor, file_workspace),
         _write_file_spec(file_workspace),
         _read_file_spec(file_workspace),
         _list_dir_spec(file_workspace),

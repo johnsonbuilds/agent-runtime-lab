@@ -74,6 +74,25 @@ class RunCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["stdout"], "sandbox")
         self.assertEqual(executor.calls, [("printf from-sandbox", "/workspace", 5)])
 
+    async def test_command_defaults_to_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            from agent_runtime.execution.local import LocalWorkspace
+            executor = RecordingExecutor()
+            registry = create_default_registry(
+                executor, workspace=LocalWorkspace(directory))
+
+            await registry.execute("run_command", {"command": "pwd"})
+
+        self.assertEqual(executor.calls[0][1], directory)
+
+    async def test_explicit_cwd_overrides_workspace_root(self) -> None:
+        executor = RecordingExecutor()
+        registry = create_default_registry(executor)
+
+        await registry.execute("run_command", {"command": "pwd", "cwd": "/tmp"})
+
+        self.assertEqual(executor.calls[0][1], "/tmp")
+
 
 if __name__ == "__main__":
     unittest.main()

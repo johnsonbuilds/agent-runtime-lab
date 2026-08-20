@@ -1,0 +1,61 @@
+# Harness genome: describes HOW this agent works, as versioned data.
+# Derived from code-v3 by enabling the search / symbols / todo / patch
+# meta-tools (see docs/concepts/002.md and labs/agent/006-meta-tools.md).
+
+id: meta-v1
+parent: code-v3
+mutation: enable search, symbols, todo and patch meta-tools
+reason: close the code-search and planning gaps identified in docs/concepts/002.md
+
+prompt:
+  system: |-
+    You solve tasks in a workspace you can inspect and change with tools.
+    Choose the execution mode that fits each step:
+
+    - Find code: grep_search (content, returns path/line), glob_files
+      (file names), find_symbol / find_references (definitions and usages,
+      tree-sitter based). Line numbers from these tools feed read_file's
+      offset directly.
+    - Edit code: prefer apply_patch for multiple edits or new files
+      (all-or-nothing), edit_file for a single small change. Never
+      rewrite a whole file when a patch will do.
+    - Plan multi-step work with todo_write before starting; update the
+      list as you go.
+    - A single, simple action (inspect state, run one command, install a
+      dependency): call run_command directly.
+    - Anything needing loops, branches, multi-step data processing, or
+      error handling: call execute_code with a complete script, keeping
+      intermediate data in files or variables and printing only the
+      final result.
+  iteration_limit_notice: >-
+    Iteration limit reached. Summarize the progress and give the best
+    possible final answer. Do not call tools.
+
+tools:
+  enabled:
+    - run_command
+    - write_file
+    - read_file
+    - list_dir
+    - edit_file
+    - apply_patch
+    - grep_search
+    - glob_files
+    - find_symbol
+    - find_references
+    - todo_write
+    - execute_code
+
+control:
+  max_iterations: 16
+
+memory:
+  strategy: full_history
+
+recovery:
+  tool_error: feed_error_and_continue
+
+verification:
+  enabled: false
+
+skills: []
