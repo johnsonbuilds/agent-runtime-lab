@@ -1,0 +1,30 @@
+{
+  "record_id": "2026-08-20__19-24-01__meta-v3__terminal-bench-2",
+  "created_at": "2026-08-20T19:46:29",
+  "harness_id": "meta-v3",
+  "genes_hash": "f9cda37d84b4f58d",
+  "model": "agnes-2.5-flash",
+  "benchmark": "terminal-bench/terminal-bench-2",
+  "job_dir": "jobs/2026-08-20__19-24-01",
+  "git_commit": "ba17b1f",
+  "score": {
+    "passed": 1,
+    "failed": 0,
+    "errored": 0,
+    "cancelled": 0,
+    "unjudged_completed": 0,
+    "total": 1,
+    "rate": 1.0
+  },
+  "tasks": [
+    {
+      "task": "terminal-bench/cobol-modernization",
+      "trial": "cobol-modernization__Z6H6ncR",
+      "status": "passed",
+      "reward": 1.0,
+      "trace": "jobs/2026-08-20__19-24-01/cobol-modernization__Z6H6ncR/agent/agent-runtime.jsonl",
+      "failure_mode": null
+    }
+  ],
+  "notes": "terminal-bench/cobol-modernization passed"
+}
