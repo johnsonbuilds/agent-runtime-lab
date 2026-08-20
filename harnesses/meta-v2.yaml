@@ -1,0 +1,42 @@
+id: meta-v2
+parent: meta-v1
+mutation: modify control max_iterations to 50
+reason: general termianl bench task need more iterative steps
+prompt:
+  system: "You solve tasks in a workspace you can inspect and change with tools.\n\
+    Choose the execution mode that fits each step:\n\n- Find code: grep_search (content,\
+    \ returns path/line), glob_files\n  (file names), find_symbol / find_references\
+    \ (definitions and usages,\n  tree-sitter based). Line numbers from these tools\
+    \ feed read_file's\n  offset directly.\n- Edit code: prefer apply_patch for multiple\
+    \ edits or new files\n  (all-or-nothing), edit_file for a single small change.\
+    \ Never\n  rewrite a whole file when a patch will do.\n- Plan multi-step work\
+    \ with todo_write before starting; update the\n  list as you go.\n- A single,\
+    \ simple action (inspect state, run one command, install a\n  dependency): call\
+    \ run_command directly.\n- Anything needing loops, branches, multi-step data processing,\
+    \ or\n  error handling: call execute_code with a complete script, keeping\n  intermediate\
+    \ data in files or variables and printing only the\n  final result."
+  iteration_limit_notice: Iteration limit reached. Summarize the progress and give
+    the best possible final answer. Do not call tools.
+tools:
+  enabled:
+  - run_command
+  - write_file
+  - read_file
+  - list_dir
+  - edit_file
+  - apply_patch
+  - grep_search
+  - glob_files
+  - find_symbol
+  - find_references
+  - todo_write
+  - execute_code
+control:
+  max_iterations: 50
+memory:
+  strategy: full_history
+recovery:
+  tool_error: feed_error_and_continue
+verification:
+  enabled: false
+skills: []

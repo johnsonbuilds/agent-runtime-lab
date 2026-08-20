@@ -22,11 +22,12 @@ environment is changed from local subprocesses to the Harbor sandbox.
 
 ## Prerequisites
 
-Requires Python 3.12+, `uv`, Docker or another Harbor environment provider, and
-an installed Harbor CLI:
+Requires Python 3.12+, `uv`, Docker or another Harbor environment provider.
+Harbor is installed as a project dependency (the `eval` group in
+`pyproject.toml`), so it runs inside this project's `.venv`:
 
 ```bash
-harbor --help
+uv run harbor --help
 ```
 
 Configure the OpenAI-compatible provider in the project root `.env`:
@@ -42,11 +43,11 @@ real API keys.
 
 ## Run One Trial
 
-The project uses a `src/` layout. When calling the global `harbor` command,
-make that directory importable:
+Run Harbor through `uv run` so it uses this project's `.venv`, where
+`agent_runtime` and its dependencies are already installed:
 
 ```bash
-PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" harbor run \
+uv run harbor run \
   -d terminal-bench/terminal-bench-2 \
   --agent agent_runtime.integrations.harbor:HarborAgent \
   -l 1 \
@@ -130,12 +131,10 @@ normally recorded as `cancelled`, and it will not have a verifier result.
 
 ### `No module named agent_runtime`
 
-Run Harbor with the `PYTHONPATH` prefix shown above, or install the project into
-the same environment that provides the Harbor command:
-
-```bash
-uv pip install -e .
-```
+Run Harbor through `uv run` from the project root, so it uses the project's
+`.venv` where `agent_runtime` is installed. Avoid the globally installed
+`harbor` command (for example one from `uv tool install`): it lives in a
+separate environment without `agent_runtime` or its dependencies.
 
 ### Missing OpenAI credentials
 
@@ -167,9 +166,7 @@ Before running a full benchmark task, verify that the adapter and runtime can
 be imported:
 
 ```bash
-PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" \
-  python -c 'from agent_runtime.integrations.harbor import HarborAgent; print(HarborAgent.name())'
+uv run python -c 'from agent_runtime.integrations.harbor import HarborAgent; print(HarborAgent.name())'
 ```
 
-This command requires the Harbor Python package to be installed in the current
-Python environment. It does not start a trial or call the LLM.
+This command does not start a trial or call the LLM.

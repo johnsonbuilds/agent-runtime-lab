@@ -53,61 +53,27 @@ Contains runnable experiments and quick-start guides for validating modules impl
 
 Each lab provides a simple way to execute and explore a specific capability of the Agent Runtime.
 
+### harnesses
+
+Contains declarative agent configuration files (YAML) used to define and run
+agent setups without changing code. Each harness describes the prompt, enabled
+tools, control limits (e.g. `max_iterations`), memory strategy, recovery
+behavior, and verification settings. Harnesses can extend others via `parent`,
+making it easy to iterate on variants (e.g. `baseline-v0`, `meta-v3`) for
+experiments and evaluations.
+
+### evaluation
+
+Contains benchmark task definitions and the records produced by running the
+agent harness against them. The `terminal_bench` subdirectory holds the task
+set (e.g. `terminal-bench-2`), while `records` stores timestamped JSON result
+files for each evaluation run, useful for comparing agent configurations over
+time.
+
 ### tests
 
 Contains unit tests and integration tests to verify the correctness and reliability of the runtime components.
 
-agent-runtime-lab/
-
-├── README.md
-
-├── docs/
-
-│   ├── concepts/
-
-│   │   ├── agent-loop.md
-│   │   ├── message-lifecycle.md
-│   │   ├── tool-calling.md
-│   │   └── observation.md
-│   │
-│   ├── reliability/
-
-│   │   ├── retry.md
-│   │   ├── timeout.md
-│   │   ├── validation.md
-│   │   └── tracing.md
-│   │
-│   └── interview/
-
-│       ├── agent-loop-qna.md
-│       └── system-design.md
-
-
-├── labs/
-
-│   ├── 001-minimal-agent-loop
-
-│   ├── 002-tool-calling
-
-│   ├── 003-memory
-
-│   ├── 004-planning
-
-│   └── 005-reliable-agent
-
-
-├── src/
-
-│   └── agent_runtime/
-
-│       ├── agent
-
-│       ├── providers
-
-│       └── tools
-
-
-└── tests/
 
 ## Quick Start
 
@@ -136,38 +102,21 @@ If another project's virtual environment is active, use `uv run --active` or
 activate this project's `.venv` first. The warning about `VIRTUAL_ENV` is from
 uv and is separate from the agent runtime.
 
-To run the Harbor adapter from this checkout, make the `src/` layout
-importable by Harbor's process:
+Harbor is a project dependency (the `eval` group). Run it through `uv run` so it
+shares this project's `.venv` with `agent_runtime` and its dependencies:
 
 ```bash
-PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" harbor run \
+uv run harbor run \
   -d terminal-bench/terminal-bench-2 \
   --agent agent_runtime.integrations.harbor:HarborAgent \
   -l 1 \
   --debug
 ```
 
-Alternatively, install this project into the same environment that provides
-the `harbor` command with `uv pip install -e .` and run the command without
-the `PYTHONPATH` prefix.
+`uv run` puts the project's `.venv` on `sys.path` (where `agent_runtime` is
+installed editable), so no `PYTHONPATH` prefix is needed.
 
-To test the shell tool directly without an LLM:
 
-```bash
-PYTHONPATH=src uv run python -c \
-  'from agent_runtime.tools import run_command; print(run_command("printf hello"))'
-```
-
-Try a non-zero exit code, a working directory, and a timeout:
-
-```bash
-PYTHONPATH=src uv run python -c \
-  'from agent_runtime.tools import run_command; print(run_command("pwd", cwd="/tmp"))'
-PYTHONPATH=src uv run python -c \
-  'from agent_runtime.tools import run_command; print(run_command("exit 7"))'
-PYTHONPATH=src uv run python -c \
-  'from agent_runtime.tools import run_command; print(run_command("sleep 2", timeout=0.1))'
-```
 
 ## RunTrace
 
