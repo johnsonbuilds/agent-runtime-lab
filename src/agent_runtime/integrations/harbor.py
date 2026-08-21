@@ -67,7 +67,8 @@ class HarborAgent(BaseAgent):
         use_stream = use_streaming()
         harness: HarnessSpec = resolve_harness(os.getenv("AGENT_RUNTIME_HARNESS"))
         logger.debug("task.start instruction=%r model=%r stream=%s harness=%s",
-                     instruction, self.llm.model, use_stream, harness.id)
+                     instruction, getattr(self.llm, "model", None),
+                     use_stream, harness.id)
         runtime_metadata = self._runtime_metadata(context, instruction, trace_path)
 
         def sync_context() -> None:

@@ -1,4 +1,9 @@
-"""The minimal tool-calling loop, independent of providers and tools."""
+"""The minimal tool-calling loop, independent of providers and tools.
+
+Tool calls are validated before they enter the conversation history: only
+canonical, validated calls are replayed to the provider, so one malformed
+tool call cannot poison later requests.
+"""
 
 from __future__ import annotations
 
@@ -140,6 +145,46 @@ def validate_tool_call(tool_call: Any, schemas: list[dict[str, Any]]) -> Validat
     return ValidatedToolCall(call_id, name, arguments)
 
 
+@dataclass(frozen=True)
+class ToolCallOutcome:
+    """Validation verdict for one untrusted LLM tool call.
+
+    ``validated`` and ``rejection`` are mutually exclusive: a call is
+    either safe to execute or carries the reason it was rejected.
+    """
+
+    tool_call: Any
+    validated: ValidatedToolCall | None
+    rejection: Exception | None
+
+
+def classify_tool_calls(tool_calls: list[Any],
+                        schemas: list[dict[str, Any]]) -> list[ToolCallOutcome]:
+    """Validate every tool call up front; nothing raises."""
+    outcomes: list[ToolCallOutcome] = []
+    for tool_call in tool_calls:
+        try:
+            validated = validate_tool_call(tool_call, schemas)
+        except Exception as exc:
+            outcomes.append(ToolCallOutcome(tool_call, None, exc))
+        else:
+            outcomes.append(ToolCallOutcome(tool_call, validated, None))
+    return outcomes
+
+
+def _canonical_tool_call(validated: ValidatedToolCall) -> dict[str, Any]:
+    """Serialize a validated call so history only ever holds valid JSON."""
+    return {"id": validated.id, "type": "function",
+            "function": {"name": validated.name,
+                         "arguments": json.dumps(validated.arguments)}}
+
+
+def canonical_tool_calls(outcomes: list[ToolCallOutcome]) -> list[dict[str, Any]]:
+    """The tool calls allowed into the conversation history, canonicalized."""
+    return [_canonical_tool_call(outcome.validated)
+            for outcome in outcomes if outcome.validated is not None]
+
+
 def _append_tool_observation(messages: list[dict[str, Any]], tool_call: Any,
                              content: str) -> None:
     call_id = tool_call.get("id", "") if isinstance(tool_call, Mapping) else ""
@@ -151,6 +196,39 @@ def _append_tool_observation(messages: list[dict[str, Any]], tool_call: Any,
             "role": "user",
             "content": f"{content} Please retry this tool call with a valid tool_call_id.",
         })
+
+
+def _rejected_observation_content(tool_call: Any, observation: str) -> str:
+    """Name the rejected tool so the model can retry the corrected call."""
+    tool = _tool_call_payload(tool_call).get("tool")
+    name = tool if isinstance(tool, str) and tool else "an unknown tool"
+    return f"Tool call to {name} was rejected and not executed. {observation}"
+
+
+def _append_rejected_observation(messages: list[dict[str, Any]], tool_call: Any,
+                                 content: str) -> None:
+    """Observe a tool call rejected before execution.
+
+    The rejected call never enters the conversation history, so the
+    observation must be a user message: a ``role: "tool"`` message would
+    reference a tool_call_id that no assistant message carries.
+    """
+    call_id = tool_call.get("id") if isinstance(tool_call, Mapping) else None
+    if isinstance(call_id, str) and call_id:
+        retry = "Please retry this tool call with valid JSON arguments."
+    else:
+        retry = "Please retry this tool call with a valid tool_call_id."
+    messages.append({"role": "user", "content": f"{content} {retry}"})
+
+
+def _trace_tool_rejection(trace: RunTrace, iteration: int,
+                          tool_meta: dict[str, Any], error: Exception) -> None:
+    """Record a rejected tool call with the normal tool span lifecycle."""
+    trace.emit("tool.start", iteration, **tool_meta)
+    error_meta = dict(tool_meta, error=str(error), duration_ms=0.0)
+    trace.emit("tool.error", iteration, **error_meta)
+    end_meta = dict(tool_meta, duration_ms=0.0, status="error")
+    trace.emit("tool.end", iteration, **end_meta)
 
 
 def _ensure_system_prompt(conversation: Conversation, system: str) -> None:
@@ -321,16 +399,20 @@ class AgentTurn:
                 agent_meta.update(stage="llm", error=error)
                 raise _TurnFailure(error) from exc
 
+            outcomes = classify_tool_calls(tool_calls, tools.schemas)
+
             assistant_message: dict[str, Any] = {
                 "role": "assistant",
-                "content": response.get("content") or "",
+                "content": content,
             }
             reasoning_content = response.get("reasoning_content")
             if reasoning_content:
                 assistant_message["reasoning_content"] = reasoning_content
-            if tool_calls:
-                assistant_message["tool_calls"] = tool_calls
-            messages.append(assistant_message)
+            canonical_calls = canonical_tool_calls(outcomes)
+            if canonical_calls:
+                assistant_message["tool_calls"] = canonical_calls
+            if tool_calls or content or reasoning_content:
+                messages.append(assistant_message)
 
             if not tool_calls:
                 answer = response.get("content", "")
@@ -338,7 +420,8 @@ class AgentTurn:
                              iteration, len(answer))
                 events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
                 return answer
-            for tool_call in tool_calls:
+            for outcome in outcomes:
+                tool_call = outcome.tool_call
                 tool_meta = _tool_trace_metadata(tool_call)
                 logger.debug("tool.dispatch iteration=%d tool=%r tool_call_id=%r",
                              iteration, tool_meta.get("tool"),
@@ -347,9 +430,12 @@ class AgentTurn:
                 events.emit("tool.started", iteration, call_id=payload["call_id"],
                             tool=payload["tool"], arguments=payload["arguments"])
                 tool_started = time.monotonic()
+                if outcome.rejection is not None:
+                    self._reject_tool_call(outcome, iteration, messages)
+                    continue
+                validated = outcome.validated
                 try:
                     with trace.span("tool", iteration, **tool_meta) as span_meta:
-                        validated = validate_tool_call(tool_call, tools.schemas)
                         result = await tools.execute(validated.name,
                                                      validated.arguments)
                         span_meta.update(tool=validated.name,
@@ -362,7 +448,7 @@ class AgentTurn:
                                 **_tool_result_summary(result))
                 except Exception as exc:
                     logger.error("tool.error iteration=%d tool=%r error=%s",
-                                 iteration, tool_meta.get("tool"), exc)
+                                 iteration, validated.name, exc)
                     events.emit("tool.failed", iteration, call_id=payload["call_id"],
                                 tool=payload["tool"], error=str(exc))
                     observation = harness.tool_error_observation(
@@ -392,6 +478,24 @@ class AgentTurn:
         logger.debug("agent.final iteration=%d answer_chars=%d", iteration, len(answer))
         events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
         return answer
+
+    def _reject_tool_call(self, outcome: ToolCallOutcome, iteration: int,
+                          messages: list[dict[str, Any]]) -> None:
+        """Observe a tool call rejected by validation; it never executed."""
+        tool_call = outcome.tool_call
+        rejection = outcome.rejection
+        assert rejection is not None
+        payload = _tool_call_payload(tool_call)
+        logger.error("tool.error iteration=%d tool=%r error=%s",
+                     iteration, payload["tool"], rejection)
+        _trace_tool_rejection(self.trace, iteration,
+                              _tool_trace_metadata(tool_call), rejection)
+        self.events.emit("tool.failed", iteration, call_id=payload["call_id"],
+                         tool=payload["tool"], error=str(rejection))
+        observation = _rejected_observation_content(
+            tool_call,
+            self.harness.tool_error_observation(rejection, tool=payload["tool"]))
+        _append_rejected_observation(messages, tool_call, observation)
 
     async def _chat_response(self, messages: list[dict[str, Any]],
                              tools: list[dict[str, Any]] | None,

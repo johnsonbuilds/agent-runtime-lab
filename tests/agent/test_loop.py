@@ -166,6 +166,95 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await run_turn("weather", llm, make_registry()), "recovered")
         self.assertIn("malformed JSON", llm.messages[1][-1]["content"])
 
+    async def test_invalid_tool_call_never_enters_conversation_history(self) -> None:
+        llm = FakeLLM([
+            {"content": "I'll check the weather.", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": "{}"}}]},
+            {"content": "recovered", "tool_calls": []},
+        ])
+
+        self.assertEqual(await run_turn("weather", llm, make_registry()), "recovered")
+        second_request = llm.messages[1]
+        assistant_messages = [message for message in second_request
+                              if message["role"] == "assistant"]
+        self.assertEqual(len(assistant_messages), 1)
+        self.assertNotIn("tool_calls", assistant_messages[0])
+        self.assertEqual(assistant_messages[0]["content"], "I'll check the weather.")
+        self.assertEqual(second_request[-1]["role"], "user")
+        self.assertIn("missing required argument: location",
+                      second_request[-1]["content"])
+        self.assertIn("weather", second_request[-1]["content"])
+        self.assertIn("retry this tool call", second_request[-1]["content"])
+
+    async def test_replayed_tool_calls_are_always_valid_json(self) -> None:
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [
+                {"id": "1", "function": {"name": "weather", "arguments": "{"}},
+                {"id": "2", "function": {"name": "weather", "arguments": "{}"}},
+                {"function": {"name": "weather", "arguments": '{"location":"Paris"}'}},
+            ]},
+            {"content": "recovered", "tool_calls": []},
+        ])
+
+        self.assertEqual(await run_turn("weather", llm, make_registry()), "recovered")
+        for request in llm.messages:
+            for message in request:
+                for tool_call in message.get("tool_calls") or []:
+                    parsed = json.loads(tool_call["function"]["arguments"])
+                    self.assertIsInstance(parsed, dict)
+
+    async def test_mixed_response_keeps_valid_call_and_drops_invalid(self) -> None:
+        llm = FakeLLM([
+            {"content": "Inspecting.", "tool_calls": [
+                {"id": "good", "function": {
+                    "name": "weather", "arguments": '{"location":"Singapore"}'}},
+                {"id": "bad", "function": {
+                    "name": "weather", "arguments": "{"}},
+            ]},
+            {"content": "done", "tool_calls": []},
+        ])
+
+        self.assertEqual(await run_turn("weather", llm, make_registry()), "done")
+        second_request = llm.messages[1]
+        assistant = next(message for message in second_request
+                         if message["role"] == "assistant")
+        self.assertEqual(assistant["content"], "Inspecting.")
+        self.assertEqual(len(assistant["tool_calls"]), 1)
+        self.assertEqual(assistant["tool_calls"][0]["id"], "good")
+        self.assertEqual(assistant["tool_calls"][0]["type"], "function")
+        self.assertEqual(json.loads(assistant["tool_calls"][0]["function"]["arguments"]),
+                         {"location": "Singapore"})
+        tool_messages = [message for message in second_request
+                         if message["role"] == "tool"]
+        self.assertEqual([message["tool_call_id"] for message in tool_messages],
+                         ["good"])
+        self.assertEqual(tool_messages[0]["content"], "Singapore")
+        rejected = [message for message in second_request
+                    if message["role"] == "user" and "malformed JSON" in message["content"]]
+        self.assertEqual(len(rejected), 1)
+
+    async def test_rejected_tool_call_records_trace_events(self) -> None:
+        llm = FakeLLM([
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "weather", "arguments": "{}"}}]},
+            {"content": "recovered", "tool_calls": []},
+        ])
+        trace = RunTrace(run_id="r1")
+
+        self.assertEqual(await run_turn("weather", llm, make_registry(), trace=trace),
+                         "recovered")
+        self.assertEqual(
+            [event.event_type for event in trace.events],
+            ["agent.start", "llm.start", "llm.end", "tool.start",
+             "tool.error", "tool.end", "llm.start", "llm.end", "agent.end"],
+        )
+        tool_error = next(event for event in trace.events
+                          if event.event_type == "tool.error")
+        self.assertEqual(tool_error.data["error"], "missing required argument: location")
+        tool_end = next(event for event in trace.events
+                        if event.event_type == "tool.end")
+        self.assertEqual(tool_end.data["status"], "error")
+
     async def test_unknown_tool_and_invalid_arguments_are_observations(self) -> None:
         llm = FakeLLM([
             {"content": "", "tool_calls": [

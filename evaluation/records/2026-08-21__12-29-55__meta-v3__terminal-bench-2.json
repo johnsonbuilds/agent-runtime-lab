@@ -1,0 +1,30 @@
+{
+  "record_id": "2026-08-21__12-29-55__meta-v3__terminal-bench-2",
+  "created_at": "2026-08-21T12:48:14",
+  "harness_id": "meta-v3",
+  "genes_hash": "f9cda37d84b4f58d",
+  "model": null,
+  "benchmark": "terminal-bench/terminal-bench-2",
+  "job_dir": "jobs/2026-08-21__12-29-55",
+  "git_commit": "f6d4127",
+  "score": {
+    "passed": 0,
+    "failed": 1,
+    "errored": 0,
+    "cancelled": 0,
+    "unjudged_completed": 0,
+    "total": 1,
+    "rate": 0.0
+  },
+  "tasks": [
+    {
+      "task": "terminal-bench/adaptive-rejection-sampler",
+      "trial": "adaptive-rejection-sampler__CnsMx5x",
+      "status": "failed",
+      "reward": 0.0,
+      "trace": "jobs/2026-08-21__12-29-55/adaptive-rejection-sampler__CnsMx5x/agent/agent-runtime.jsonl",
+      "failure_mode": "false-success"
+    }
+  ],
+  "notes": null
+}
