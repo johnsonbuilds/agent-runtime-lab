@@ -46,6 +46,10 @@ class OpenAICompatibleLLM:
             kwargs["tools"] = tools
         response = await self.client.chat.completions.create(**kwargs)
         async for chunk in response:
+            if not chunk.choices:
+                # Some providers append a final chunk with empty choices
+                # (e.g. a usage summary); it carries no delta payload.
+                continue
             choice = chunk.choices[0]
             delta = choice.delta
             reasoning = getattr(delta, "reasoning_content", None) or ""

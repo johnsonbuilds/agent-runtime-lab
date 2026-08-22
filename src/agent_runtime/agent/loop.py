@@ -568,6 +568,9 @@ class AgentTurn:
         response = {"content": "".join(content), "tool_calls": tool_calls}
         if reasoning:
             response["reasoning_content"] = "".join(reasoning)
+        if not content and not reasoning and not tool_calls:
+            raise RuntimeError(
+                "LLM stream ended without any content, reasoning, or tool calls")
         return response
 
 
