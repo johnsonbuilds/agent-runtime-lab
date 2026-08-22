@@ -1,0 +1,30 @@
+{
+  "record_id": "2026-08-22__18-33-43__meta-v5__terminal-bench-2",
+  "created_at": "2026-08-22T19:19:23",
+  "harness_id": "meta-v5",
+  "genes_hash": "89890caaf3ec58b9",
+  "model": "agnes-2.5-flash",
+  "benchmark": "terminal-bench/terminal-bench-2",
+  "job_dir": "jobs/2026-08-22__18-33-43",
+  "git_commit": "2188664",
+  "score": {
+    "passed": 0,
+    "failed": 0,
+    "errored": 1,
+    "cancelled": 0,
+    "unjudged_completed": 0,
+    "total": 1,
+    "rate": null
+  },
+  "tasks": [
+    {
+      "task": "terminal-bench/adaptive-rejection-sampler",
+      "trial": "adaptive-rejection-sampler__pm2V7gP",
+      "status": "error",
+      "reward": null,
+      "trace": "jobs/2026-08-22__18-33-43/adaptive-rejection-sampler__pm2V7gP/agent/agent-runtime.jsonl",
+      "failure_mode": null
+    }
+  ],
+  "notes": "use meta-v5 run terminal-bench/adaptive-rejection-sampler"
+}

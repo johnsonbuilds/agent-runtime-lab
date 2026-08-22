@@ -377,7 +377,8 @@ class AgentTurn:
                     iteration, len(messages), len(tools.schemas), self.stream)
                 with trace.span("llm", iteration,
                                 message_count=len(messages),
-                                tool_count=len(tools.schemas)) as span_meta:
+                                tool_count=len(tools.schemas),
+                                messages=list(messages)) as span_meta:
                     response = await self._chat_response(
                         messages, tools.schemas, iteration)
                     tool_calls = response.get("tool_calls") or []
@@ -464,7 +465,8 @@ class AgentTurn:
             logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
                          iteration, len(messages), self.stream)
             with trace.span("llm", iteration,
-                            message_count=len(messages), tool_count=0) as span_meta:
+                            message_count=len(messages), tool_count=0,
+                            messages=list(messages)) as span_meta:
                 response = await self._chat_response(messages, None, iteration)
                 span_meta.update(tool_count=0, tools=[], final=True)
                 logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",

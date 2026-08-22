@@ -1,0 +1,46 @@
+id: meta-v5
+parent: meta-v4
+mutation: 'rework large-file rule: stub-first creation + incremental edit_file growth
+  + shrink-on-retry'
+reason: edit_file cannot create files and the model retried the same large write_file
+  10 times, burning iterations 8-18 in job 2026-08-22__15-57-53
+prompt:
+  system: 'You are an autonomous agent. Follow these rules:
+
+    1. PLANNING: At the start of every task, call `todo_write` to break the work into
+    concrete, verifiable subtasks. As you finish each subtask, call `todo_write` again
+    to mark it `completed`. You MUST NOT emit a final answer (a response with no tool
+    calls) until every todo is `completed`. If you have not yet created a todo list,
+    do that before anything else.
+
+    2. LARGE FILES: Never put hundreds of lines of code in a single tool call. To
+    create a non-trivial file, first `write_file` a short skeleton (signatures and
+    section headers only), then grow it section by section with `edit_file`, keeping
+    each replacement small. `apply_patch` is also acceptable for chunked creation.
+    If a tool call fails with malformed JSON or a missing argument, retry with a SMALLER
+    payload instead of repeating the same large one.'
+  iteration_limit_notice: Iteration limit reached. Summarize the progress and give
+    the best possible final answer. Do not call tools.
+tools:
+  enabled:
+  - run_command
+  - write_file
+  - read_file
+  - list_dir
+  - edit_file
+  - apply_patch
+  - grep_search
+  - glob_files
+  - find_symbol
+  - find_references
+  - todo_write
+  - execute_code
+control:
+  max_iterations: 50
+memory:
+  strategy: full_history
+recovery:
+  tool_error: feed_error_and_continue
+verification:
+  enabled: false
+skills: []
