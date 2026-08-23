@@ -67,8 +67,10 @@ class UserEventSequenceTests(unittest.IsolatedAsyncioTestCase):
                                   "function": {"name": "weather", "arguments": "{"}}]},
                 {"tool_calls": [{"index": 0,
                                   "function": {"arguments": "\"location\":\"Singapore\"}"}}]},
+                {"finish_reason": "tool_calls"},
             ],
-            [{"content": "It is sunny", "tool_calls": []}],
+            [{"content": "It is sunny", "tool_calls": []},
+             {"finish_reason": "stop"}],
         ])
         events = EventEmitter(run_id="r1")
 

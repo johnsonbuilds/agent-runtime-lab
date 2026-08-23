@@ -69,6 +69,7 @@ class FakeLLM:
 
     async def stream(self, messages: list[dict[str, Any]], tools: Any = None):
         yield self.responses.pop(0)
+        yield {"content": "", "reasoning_content": "", "finish_reason": "stop"}
 
 
 class HarborAgentSmokeTests(unittest.IsolatedAsyncioTestCase):

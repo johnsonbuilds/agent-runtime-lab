@@ -39,12 +39,19 @@ class OpenAICompatibleLLM:
     async def stream(self, messages: Sequence[dict[str, Any]],
                      tools: list[dict[str, Any]] | None = None,
                      **request_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
-        """Yield provider-independent content and tool-call deltas."""
+        """Yield provider-independent content and tool-call deltas.
+
+        After the last payload delta, yields one final dict carrying the
+        ``finish_reason`` (e.g. ``stop``, ``tool_calls``) when the stream
+        terminated normally.  If the server cuts the stream without a
+        finish marker, no such signal is emitted.
+        """
         kwargs = {"model": self.model, "messages": list(messages),
-                  "stream": True, "temperature": self.temperature, **request_kwargs}
+                   "stream": True, "temperature": self.temperature, **request_kwargs}
         if tools is not None:
             kwargs["tools"] = tools
         response = await self.client.chat.completions.create(**kwargs)
+        finish_reason: str | None = None
         async for chunk in response:
             if not chunk.choices:
                 # Some providers append a final chunk with empty choices
@@ -52,6 +59,8 @@ class OpenAICompatibleLLM:
                 continue
             choice = chunk.choices[0]
             delta = choice.delta
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
             reasoning = getattr(delta, "reasoning_content", None) or ""
             data: dict[str, Any] = {"content": delta.content or "",
                                     "reasoning_content": reasoning}
@@ -70,5 +79,8 @@ class OpenAICompatibleLLM:
                 data["tool_calls"] = calls
             if data["content"] or calls or reasoning:
                 yield data
+        if finish_reason:
+            yield {"content": "", "reasoning_content": "",
+                   "finish_reason": finish_reason}
 
 OpenAILLM = OpenAICompatibleLLM

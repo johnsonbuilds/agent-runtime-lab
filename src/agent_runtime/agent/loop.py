@@ -526,6 +526,7 @@ class AgentTurn:
         content: list[str] = []
         reasoning: list[str] = []
         tool_calls: list[dict[str, Any]] = []
+        finish_reason: str | None = None
         logger.debug("llm.stream.start iteration=%d", iteration)
         stream_iterator = self.llm.stream(messages, tools).__aiter__()
         while True:
@@ -546,6 +547,10 @@ class AgentTurn:
                 ) from exc
             if not isinstance(chunk, Mapping):
                 raise TypeError("LLM stream chunks must be objects")
+            reason = chunk.get("finish_reason")
+            if isinstance(reason, str) and reason:
+                finish_reason = reason
+                continue
             text = chunk.get("content") or ""
             if text:
                 content.append(str(text))
@@ -564,10 +569,20 @@ class AgentTurn:
             self.trace.emit("llm.chunk", iteration,
                             content=text, tool_call_count=len(chunk.get("tool_calls") or []),
                             reasoning_chars=len(reasoning_text))
-        logger.debug("llm.stream.end iteration=%d", iteration)
+        logger.debug("llm.stream.end iteration=%d finish_reason=%r", iteration,
+                     finish_reason)
+        self.trace.emit("llm.stream.finish", iteration, finish_reason=finish_reason)
         response = {"content": "".join(content), "tool_calls": tool_calls}
         if reasoning:
             response["reasoning_content"] = "".join(reasoning)
+        if finish_reason is None:
+            # The server cut the stream without a finish marker (observed on
+            # free-tier reasoning models after very long thinking).  Treat the
+            # truncated stream as a failed turn so it can be retried instead
+            # of silently becoming an empty final answer.
+            raise RuntimeError(
+                "LLM stream ended without a finish_reason "
+                "(stream may have been truncated by the server)")
         if not content and not reasoning and not tool_calls:
             raise RuntimeError(
                 "LLM stream ended without any content, reasoning, or tool calls")

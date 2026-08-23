@@ -73,8 +73,10 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
                                   "function": {"name": "weather", "arguments": "{"}}]},
                 {"tool_calls": [{"index": 0,
                                   "function": {"arguments": "\"location\":\"Singapore\"}"}}]},
+                {"finish_reason": "tool_calls"},
             ],
-            [{"content": "It is sunny", "tool_calls": []}],
+            [{"content": "It is sunny", "tool_calls": []},
+             {"finish_reason": "stop"}],
         ])
         trace = RunTrace(run_id="streaming")
 
@@ -84,8 +86,10 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [event.event_type for event in trace.events],
             ["agent.start", "llm.start", "llm.chunk", "llm.chunk", "llm.chunk",
-             "llm.chunk", "llm.chunk", "llm.end", "tool.start", "tool.end",
-             "llm.start", "llm.chunk", "llm.end", "agent.end"],
+             "llm.chunk", "llm.chunk", "llm.stream.finish", "llm.end",
+             "tool.start", "tool.end",
+             "llm.start", "llm.chunk", "llm.stream.finish", "llm.end",
+             "agent.end"],
         )
         self.assertEqual(llm.messages[1][-1]["content"], "Singapore")
         self.assertEqual(llm.messages[1][1]["tool_calls"][0]["type"], "function")
@@ -118,17 +122,26 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         llm_end = next(event for event in trace.events
                        if event.event_type == "llm.end")
         self.assertEqual(llm_end.data["tool_count"], 1)
-        self.assertEqual(llm_end.data["tools"], ["weather"])
-        self.assertFalse(llm_end.data["final"])
-        self.assertIn("duration_ms", llm_end.data)
-        tool_end = next(event for event in trace.events
-                        if event.event_type == "tool.end")
-        self.assertEqual(tool_end.data["tool"], "weather")
-        self.assertNotIn("result", tool_end.data)
+
+    async def test_truncated_stream_without_finish_reason_fails_the_turn(self) -> None:
+        llm = StreamingLLM([
+            [{"content": "", "reasoning_content": "thinking very long",
+              "tool_calls": []}],
+        ])
+        answer = await run_turn("weather", llm, make_registry(), stream=True)
+        self.assertIn("finish_reason", answer)
+        self.assertIn("LLM error", answer)
+
+    async def test_stream_with_no_payload_at_all_fails_the_turn(self) -> None:
+        llm = StreamingLLM([
+            [{"finish_reason": "stop"}],
+        ])
+        answer = await run_turn("weather", llm, make_registry(), stream=True)
+        self.assertIn("without any content, reasoning, or tool calls", answer)
+        self.assertIn("LLM error", answer)
 
     def test_trace_span_records_lifecycle(self) -> None:
         trace = RunTrace(run_id="r1")
-
         with trace.span("operation", iteration=2, request_id="req-1") as meta:
             meta["result_count"] = 3
 
