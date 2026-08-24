@@ -23,7 +23,25 @@ from agent_runtime.execution.local import LocalShellExecutor, LocalWorkspace
 from agent_runtime.execution.guard import GuardDecision
 
 
-LANGUAGES = {"python": "py", "bash": "sh"}
+def _python_binary() -> str:
+    return os.getenv("AGENT_RUNTIME_PYTHON", "python3")
+
+
+LANGUAGE_SPECS: dict[str, dict[str, str]] = {
+    "python": {"extension": "py",
+               "interpreter": _python_binary,
+               "install_hint": "install python3 (e.g. apt-get install -y python3)"},
+    "bash": {"extension": "sh",
+             "interpreter": "bash",
+             "install_hint": ""},
+    "r": {"extension": "R",
+          "interpreter": "Rscript",
+          "install_hint": "install R (e.g. apt-get install -y r-base-core)"},
+    "node": {"extension": "js",
+             "interpreter": "node",
+             "install_hint": "install Node.js (e.g. apt-get install -y nodejs)"},
+}
+LANGUAGES = {name: spec["extension"] for name, spec in LANGUAGE_SPECS.items()}
 SCRIPTS_DIR = ".scripts"
 OUTPUTS_DIR = ".outputs"
 DEFAULT_TIMEOUT = 120.0
@@ -33,8 +51,9 @@ OUTPUT_WINDOW_CHARS = 4_000
 _SEQUENCE = re.compile(r"^(\d{4})\.")
 
 
-def _python_binary() -> str:
-    return os.getenv("AGENT_RUNTIME_PYTHON", "python3")
+def _interpreter_for(language: str) -> str:
+    interpreter = LANGUAGE_SPECS[language]["interpreter"]
+    return interpreter() if callable(interpreter) else interpreter
 
 
 def _max_output_chars() -> int:
@@ -58,9 +77,7 @@ async def _next_script_name(workspace: Workspace, extension: str) -> str:
 
 
 def _run_command_for(language: str, script: str) -> str:
-    if language == "python":
-        return f"{_python_binary()} {shlex.quote(script)}"
-    return f"bash {shlex.quote(script)}"
+    return f"{_interpreter_for(language)} {shlex.quote(script)}"
 
 
 def _guard_decision(executor: ShellExecutor, script: str,
@@ -86,6 +103,28 @@ def _guard_decision(executor: ShellExecutor, script: str,
         if not decision.allowed:
             return decision
     return None
+
+
+def _with_interpreter_hint(result: dict[str, Any],
+                           language: str) -> dict[str, Any]:
+    """Append an install hint when the interpreter was not found.
+
+    Exit code 127 means the shell could not find the interpreter binary
+    (e.g. ``Rscript: command not found`` on a machine without R).  Turn
+    that opaque failure into an actionable hint so the agent can install
+    the runtime via ``run_command`` and retry.
+    """
+    if result.get("exit_code") != 127:
+        return result
+    interpreter = _interpreter_for(language)
+    hint = LANGUAGE_SPECS[language]["install_hint"]
+    message = (f"hint: '{interpreter}' was not found; the script was not run."
+               f" Install the {language} runtime first via run_command"
+               + (f" ({hint})" if hint else ""))
+    stderr = result.get("stderr") or ""
+    if message not in stderr:
+        result = {**result, "stderr": f"{stderr}\n{message}".strip()}
+    return result
 
 
 async def execute_code(code: str, language: str = "python",
@@ -120,6 +159,7 @@ async def execute_code(code: str, language: str = "python",
                           "message": decision.reason or "command blocked"},
                 "script_path": script, "language": language}
     result = await ex.execute(command, cwd=cwd, timeout=timeout)
+    result = _with_interpreter_hint(result, language)
 
     stdout: str = result.get("stdout") or ""
     if len(stdout) > _max_output_chars():
@@ -140,6 +180,6 @@ async def execute_code(code: str, language: str = "python",
 
 
 __all__ = [
-    "DEFAULT_MAX_OUTPUT_CHARS", "DEFAULT_TIMEOUT", "LANGUAGES", "OUTPUTS_DIR",
-    "SCRIPTS_DIR", "execute_code",
+    "DEFAULT_MAX_OUTPUT_CHARS", "DEFAULT_TIMEOUT", "LANGUAGES", "LANGUAGE_SPECS",
+    "OUTPUTS_DIR", "SCRIPTS_DIR", "execute_code",
 ]

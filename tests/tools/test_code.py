@@ -90,6 +90,59 @@ class ExecuteCodeTests(unittest.IsolatedAsyncioTestCase):
                 await registry.execute("execute_code", {
                     "code": "print('x')\n", "language": "cobol"})
 
+    async def test_r_language_runs_via_rscript(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            registry = make_registry(directory)
+
+            result = await registry.execute("execute_code", {
+                "code": "cat('hello from R\n')\n", "language": "r"})
+
+        self.assertEqual(result["script_path"], ".scripts/0001.R")
+        self.assertEqual(result["language"], "r")
+        if result["exit_code"] == 0:
+            self.assertIn("hello from R", result["stdout"])
+        else:
+            self.assertEqual(result["exit_code"], 127)
+            self.assertIn("'Rscript' was not found", result["stderr"])
+            self.assertIn("install R", result["stderr"])
+
+    async def test_node_language_runs_via_node(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            registry = make_registry(directory)
+
+            result = await registry.execute("execute_code", {
+                "code": "console.log('hello from node')\n", "language": "node"})
+
+        self.assertEqual(result["script_path"], ".scripts/0001.js")
+        self.assertEqual(result["language"], "node")
+        if result["exit_code"] == 0:
+            self.assertIn("hello from node", result["stdout"])
+        else:
+            self.assertEqual(result["exit_code"], 127)
+            self.assertIn("'node' was not found", result["stderr"])
+
+    async def test_missing_interpreter_gets_install_hint(self) -> None:
+        from agent_runtime.tools.code import _interpreter_for, _with_interpreter_hint
+
+        result = {"stdout": "", "stderr": "/bin/sh: 1: rscript: not found",
+                  "exit_code": 127, "duration": 0.1}
+        hinted = _with_interpreter_hint(result, "r")
+
+        self.assertEqual(hinted["exit_code"], 127)
+        self.assertIn("'Rscript' was not found", hinted["stderr"])
+        self.assertIn("r-base-core", hinted["stderr"])
+        self.assertIn("run_command", hinted["stderr"])
+        # Original fields are untouched and the input dict is not mutated.
+        self.assertIn("rscript: not found", hinted["stderr"])
+        self.assertNotIn("hint:", result["stderr"])
+
+    async def test_non_127_failure_gets_no_hint(self) -> None:
+        from agent_runtime.tools.code import _with_interpreter_hint
+
+        result = {"stdout": "", "stderr": "ValueError: boom", "exit_code": 1,
+                  "duration": 0.1}
+        self.assertIs(_with_interpreter_hint(result, "python"), result)
+
     async def test_small_stdout_is_returned_in_full(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             registry = make_registry(directory)

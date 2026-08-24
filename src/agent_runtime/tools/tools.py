@@ -250,17 +250,24 @@ def _execute_code_spec(executor: ShellExecutor, workspace: Workspace) -> ToolSpe
     return ToolSpec("execute_code",
                     "Write a complete script to the workspace and execute it "
                     "in one step, returning exit code, stdout, and stderr. "
-                    "Prefer this over run_command whenever the step needs "
-                    "loops, branches, multi-step data processing, or error "
-                    "handling: keep intermediate data in files or variables "
-                    "and print only the final result. Each script is saved "
-                    "under .scripts/ and can be re-run with run_command after "
-                    "fixing the environment.",
+                    "Supports python (runs via python3), bash (runs via bash), "
+                    "r (runs via Rscript), and node (runs via node); the "
+                    "interpreter for the chosen language must already be "
+                    "installed. Prefer this over run_command whenever the "
+                    "step needs loops, branches, multi-step data processing, "
+                    "or error handling: keep intermediate data in files or "
+                    "variables and print only the final result. Each script "
+                    "is saved under .scripts/ and can be re-run with "
+                    "run_command after fixing the environment.",
                     {"type": "object", "properties": {
                         "code": {"type": "string",
                                  "description": "Complete script content"},
-                        "language": {"type": "string", "enum": ["python", "bash"],
-                                     "description": "Script language",
+                        "language": {"type": "string", "enum": ["python", "bash", "r", "node"],
+                                     "description": "Script language: python "
+                                                    "(python3), bash, r (Rscript), "
+                                                    "or node (node). Defaults to "
+                                                    "python — pass language "
+                                                    "explicitly for anything else",
                                      "default": "python"},
                         "path": {"type": "string",
                                  "description": "Script path inside the workspace; "
