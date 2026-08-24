@@ -45,7 +45,7 @@ TOOL_ERROR_STRATEGIES: dict[str, ToolErrorStrategy] = {
     "feed_error_and_continue": feed_error_and_continue,
 }
 
-MEMORY_STRATEGIES: tuple[str, ...] = ("full_history",)
+MEMORY_STRATEGIES: tuple[str, ...] = ("full_history", "compact_observations")
 
 
 @dataclass(frozen=True)

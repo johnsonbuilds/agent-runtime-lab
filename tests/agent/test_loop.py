@@ -140,6 +140,83 @@ class AgentLoopErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("without any content, reasoning, or tool calls", answer)
         self.assertIn("LLM error", answer)
 
+    async def test_reasoning_budget_cut_appends_nudge_and_retries(self) -> None:
+        environ["AGENT_RUNTIME_MAX_REASONING_CHARS"] = "500"
+        try:
+            llm = StreamingLLM([
+                # Turn 1: thinking-only spiral past the budget.
+                [{"content": "", "reasoning_content": "x" * 600,
+                  "tool_calls": []}],
+                # Turn 2: after the nudge the model acts.
+                [{"content": "", "tool_calls": [
+                    {"index": 0, "id": "1", "function": {
+                        "name": "weather",
+                        "arguments": '{"location":"Singapore"}'}}]},
+                 {"finish_reason": "tool_calls"}],
+                # Turn 3: final answer.
+                [{"content": "It is sunny", "tool_calls": []},
+                 {"finish_reason": "stop"}],
+            ])
+            trace = RunTrace(run_id="budget")
+
+            answer = await run_turn("weather", llm, make_registry(),
+                                    stream=True, trace=trace)
+
+            self.assertEqual(answer, "It is sunny")
+            # The nudge landed in the conversation before the retry.
+            nudges = [m for m in llm.messages[1]
+                      if m["role"] == "user" and "Stop reasoning and act" in m["content"]]
+            self.assertEqual(len(nudges), 1)
+            budget_events = [e for e in trace.events
+                             if e.event_type == "llm.reasoning_budget"]
+            self.assertEqual(len(budget_events), 1)
+            self.assertEqual(budget_events[0].data["reasoning_chars"], 600)
+        finally:
+            environ.pop("AGENT_RUNTIME_MAX_REASONING_CHARS", None)
+
+    async def test_reasoning_budget_ignores_turns_that_act(self) -> None:
+        environ["AGENT_RUNTIME_MAX_REASONING_CHARS"] = "500"
+        try:
+            llm = StreamingLLM([
+                # Long reasoning, but the turn ends with a tool call:
+                # the budget must not cut it.
+                [{"content": "", "reasoning_content": "x" * 600,
+                  "tool_calls": [
+                      {"index": 0, "id": "1", "function": {
+                          "name": "weather",
+                          "arguments": '{"location":"Singapore"}'}}]},
+                 {"finish_reason": "tool_calls"}],
+                [{"content": "It is sunny", "tool_calls": []},
+                 {"finish_reason": "stop"}],
+            ])
+
+            answer = await run_turn("weather", llm, make_registry(), stream=True)
+
+            self.assertEqual(answer, "It is sunny")
+            nudges = [m for m in llm.messages[1]
+                      if m["role"] == "user" and "Stop reasoning and act" in m["content"]]
+            self.assertEqual(len(nudges), 0)
+        finally:
+            environ.pop("AGENT_RUNTIME_MAX_REASONING_CHARS", None)
+
+    async def test_reasoning_budget_zero_disables_guard(self) -> None:
+        environ["AGENT_RUNTIME_MAX_REASONING_CHARS"] = "0"
+        try:
+            llm = StreamingLLM([
+                [{"content": "", "reasoning_content": "x" * 600,
+                  "tool_calls": []},
+                 {"finish_reason": "stop"}],
+            ])
+
+            answer = await run_turn("weather", llm, make_registry(), stream=True)
+
+            # No nudge: the guard was off, and the (empty) turn completed
+            # as the final answer after a single request.
+            self.assertEqual(len(llm.messages), 1)
+            self.assertEqual(answer, "")
+        finally:
+            environ.pop("AGENT_RUNTIME_MAX_REASONING_CHARS", None)
+
     def test_trace_span_records_lifecycle(self) -> None:
         trace = RunTrace(run_id="r1")
         with trace.span("operation", iteration=2, request_id="req-1") as meta:

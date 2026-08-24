@@ -7,9 +7,17 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 
+def _reasoning_effort() -> str | None:
+    """Optional reasoning-effort hint (e.g. ``low``) for models that
+    support controlling chain-of-thought depth.  Read per request so
+    the env can be toggled without rebuilding the provider."""
+    value = os.getenv("AGENT_RUNTIME_REASONING_EFFORT", "").strip()
+    return value or None
+
+
 class OpenAICompatibleLLM:
     def __init__(self, api_key: str | None = None, base_url: str | None = None,
-                 model: str | None = None, **client_kwargs: Any) -> None:
+                  model: str | None = None, **client_kwargs: Any) -> None:
         try:
             from openai import AsyncOpenAI
         except ImportError as exc:
@@ -25,6 +33,9 @@ class OpenAICompatibleLLM:
                    **request_kwargs: Any) -> dict[str, Any]:
         kwargs = {"model": self.model, "messages": list(messages),
                   "temperature": self.temperature, **request_kwargs}
+        effort = _reasoning_effort()
+        if effort is not None:
+            kwargs.setdefault("reasoning_effort", effort)
         if tools is not None:
             kwargs["tools"] = tools
         response = await self.client.chat.completions.create(**kwargs)
@@ -48,6 +59,9 @@ class OpenAICompatibleLLM:
         """
         kwargs = {"model": self.model, "messages": list(messages),
                    "stream": True, "temperature": self.temperature, **request_kwargs}
+        effort = _reasoning_effort()
+        if effort is not None:
+            kwargs.setdefault("reasoning_effort", effort)
         if tools is not None:
             kwargs["tools"] = tools
         response = await self.client.chat.completions.create(**kwargs)

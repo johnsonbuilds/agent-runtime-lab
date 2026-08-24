@@ -16,12 +16,22 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from agent_runtime.agent.memory import apply_memory_strategy
 from agent_runtime.events import EventEmitter
 from agent_runtime.harness import HarnessSpec, default_harness
 from agent_runtime.trace import RunTrace
 
 
 logger = logging.getLogger(__name__)
+
+
+def _message_list_chars(messages: list[dict[str, Any]]) -> int:
+    total = 0
+    for message in messages:
+        total += len(message.get("content") or "")
+        for call in message.get("tool_calls") or []:
+            total += len((call.get("function") or {}).get("arguments") or "")
+    return total
 
 
 def _stream_idle_timeout() -> float | None:
@@ -31,6 +41,32 @@ def _stream_idle_timeout() -> float | None:
     except ValueError:
         return 120.0
     return timeout if timeout > 0 else None
+
+
+def _reasoning_budget_chars() -> int | None:
+    """Max accumulated reasoning chars before a thinking-only turn is cut.
+
+    Guards against reasoning models that spiral into unbounded chain of
+    thought without ever emitting content or tool calls (observed on
+    ARS-class tasks).  0 or a negative value disables the guard.
+    """
+    raw = os.getenv("AGENT_RUNTIME_MAX_REASONING_CHARS", "50000")
+    try:
+        budget = int(raw)
+    except ValueError:
+        return 50_000
+    return budget if budget > 0 else None
+
+
+class _ReasoningBudgetExceeded(RuntimeError):
+    """A thinking-only turn blew the reasoning budget; nudge and retry."""
+
+    def __init__(self, reasoning_chars: int, budget: int) -> None:
+        super().__init__(
+            f"reasoning exceeded {budget} chars ({reasoning_chars} produced) "
+            f"with no content or tool calls yet")
+        self.reasoning_chars = reasoning_chars
+        self.budget = budget
 
 
 def use_streaming() -> bool:
@@ -372,15 +408,24 @@ class AgentTurn:
 
         for iteration in range(1, self.max_iterations + 1):
             try:
+                request_messages = apply_memory_strategy(
+                    messages, harness.memory.strategy)
+                if request_messages is not messages:
+                    trace.emit("memory.compact", iteration,
+                               original_chars=_message_list_chars(messages),
+                               request_chars=_message_list_chars(
+                                   request_messages),
+                               original_count=len(messages),
+                               request_count=len(request_messages))
                 logger.debug(
                     "llm.request.start iteration=%d messages=%d tools=%d stream=%s",
                     iteration, len(messages), len(tools.schemas), self.stream)
                 with trace.span("llm", iteration,
-                                message_count=len(messages),
+                                message_count=len(request_messages),
                                 tool_count=len(tools.schemas),
-                                messages=list(messages)) as span_meta:
+                                messages=list(request_messages)) as span_meta:
                     response = await self._chat_response(
-                        messages, tools.schemas, iteration)
+                        request_messages, tools.schemas, iteration)
                     tool_calls = response.get("tool_calls") or []
                     content = response.get("content") or ""
 
@@ -394,6 +439,24 @@ class AgentTurn:
                         "llm.request.end iteration=%d content_chars=%d tool_calls=%s",
                         iteration, len(content),
                         [_tool_trace_metadata(call).get("tool") for call in tool_calls])
+            except _ReasoningBudgetExceeded as exc:
+                # The model spiralled into thinking without acting.  Append
+                # an assistant placeholder plus a nudge and retry on the
+                # next iteration (consuming one iteration of the budget) —
+                # resending identical input would just reproduce the spiral.
+                logger.warning(
+                    "llm.reasoning_budget_exceeded iteration=%d %s", iteration, exc)
+                messages.append({"role": "assistant",
+                                 "content": "(extended reasoning omitted)"})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Your last turn produced {exc.reasoning_chars} characters "
+                        f"of reasoning without any content or tool calls. Stop "
+                        f"reasoning and act now: call a tool, or give your "
+                        f"final answer."),
+                })
+                continue
             except Exception as exc:
                 logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
                 error = f"LLM error: {exc}"
@@ -462,15 +525,38 @@ class AgentTurn:
                          harness.prompt.iteration_limit_notice})
         iteration = self.max_iterations + 1
         try:
+            request_messages = apply_memory_strategy(
+                messages, harness.memory.strategy)
+            if request_messages is not messages:
+                trace.emit("memory.compact", iteration,
+                           original_chars=_message_list_chars(messages),
+                           request_chars=_message_list_chars(
+                               request_messages),
+                           original_count=len(messages),
+                           request_count=len(request_messages))
             logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
-                         iteration, len(messages), self.stream)
+                         iteration, len(request_messages), self.stream)
             with trace.span("llm", iteration,
-                            message_count=len(messages), tool_count=0,
-                            messages=list(messages)) as span_meta:
-                response = await self._chat_response(messages, None, iteration)
+                            message_count=len(request_messages), tool_count=0,
+                            messages=list(request_messages)) as span_meta:
+                response = await self._chat_response(
+                    request_messages, None, iteration)
                 span_meta.update(tool_count=0, tools=[], final=True)
                 logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",
                              iteration, len(response.get("content") or ""))
+        except _ReasoningBudgetExceeded as exc:
+            # The forced summary turn has no tools, so nudging makes no
+            # sense; surface the partial reasoning as the final answer
+            # instead of failing the whole task at the finish line.
+            logger.warning("llm.reasoning_budget_exceeded iteration=%d %s",
+                           iteration, exc)
+            answer = ("(reasoning budget exceeded while summarising; "
+                      "the work above stands as delivered)")
+            logger.debug("agent.final iteration=%d answer_chars=%d", iteration,
+                         len(answer))
+            events.emit("agent.completed", iteration, iterations=iteration,
+                        answer=answer)
+            return answer
         except Exception as exc:
             logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
             error = f"LLM error: {exc}"
@@ -527,6 +613,7 @@ class AgentTurn:
         reasoning: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         finish_reason: str | None = None
+        reasoning_budget = _reasoning_budget_chars()
         logger.debug("llm.stream.start iteration=%d", iteration)
         stream_iterator = self.llm.stream(messages, tools).__aiter__()
         while True:
@@ -561,6 +648,19 @@ class AgentTurn:
                 if not isinstance(delta, Mapping):
                     raise TypeError("LLM tool call chunks must be objects")
                 _merge_stream_tool_call(tool_calls, delta)
+            if reasoning_budget is not None and reasoning and not content \
+                    and not tool_calls:
+                total_reasoning = sum(len(part) for part in reasoning)
+                if total_reasoning > reasoning_budget:
+                    logger.error(
+                        "llm.reasoning_budget iteration=%d budget=%d "
+                        "reasoning_chars=%d", iteration, reasoning_budget,
+                        total_reasoning)
+                    self.trace.emit("llm.reasoning_budget", iteration,
+                                    budget=reasoning_budget,
+                                    reasoning_chars=total_reasoning)
+                    raise _ReasoningBudgetExceeded(total_reasoning,
+                                                   reasoning_budget)
             if text or reasoning_text:
                 self.events.emit("assistant.delta", iteration,
                                  content=text, reasoning=reasoning_text)
