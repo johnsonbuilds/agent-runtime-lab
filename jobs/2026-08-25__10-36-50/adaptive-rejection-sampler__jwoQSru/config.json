@@ -1,0 +1,13 @@
+{
+    "task": {
+        "name": "terminal-bench/adaptive-rejection-sampler",
+        "ref": "sha256:a3cc947ba81ea6be1e7255c7b398a30f8017e280d586c2e09eccfaf67a18d35d",
+        "source": "terminal-bench/terminal-bench-2"
+    },
+    "trial_name": "adaptive-rejection-sampler__jwoQSru",
+    "trials_dir": "jobs/2026-08-25__10-36-50",
+    "agent": {
+        "name": "agent_runtime.integrations.harbor:HarborAgent"
+    },
+    "job_id": "93d7de1e-ba64-4625-9b15-23fe1f213fde"
+}
