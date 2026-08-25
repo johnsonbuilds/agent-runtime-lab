@@ -1,0 +1,43 @@
+{
+    "id": "a4074f19-2a86-4dfc-96e6-006ba35af3aa",
+    "started_at": "2026-08-25T08:50:37.982410",
+    "updated_at": "2026-08-25T09:07:00.895541",
+    "finished_at": "2026-08-25T09:07:00.895541",
+    "n_total_trials": 1,
+    "stats": {
+        "n_completed_trials": 1,
+        "n_errored_trials": 1,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "agent-runtime-lab__terminal-bench/terminal-bench-2": {
+                "n_trials": 1,
+                "n_errors": 1,
+                "metrics": [
+                    {
+                        "mean": 1.0
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "1.0": [
+                            "adaptive-rejection-sampler__XW3eMcH"
+                        ]
+                    }
+                },
+                "exception_stats": {
+                    "AgentTimeoutError": [
+                        "adaptive-rejection-sampler__XW3eMcH"
+                    ]
+                }
+            }
+        },
+        "n_input_tokens": null,
+        "n_cache_tokens": null,
+        "n_output_tokens": null,
+        "cost_usd": null
+    }
+}
