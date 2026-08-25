@@ -17,7 +17,6 @@ from .patch import apply_patch
 from .search import DEFAULT_GREP_RESULTS, DEFAULT_GLOB_RESULTS, glob_files, grep_search
 from .shell import run_command
 from .symbols import TreeSitterIndex, find_references, find_symbol
-from .todo import STATUSES, todo_write
 
 
 @dataclass(frozen=True)
@@ -228,24 +227,6 @@ def _find_references_spec(index: TreeSitterIndex) -> ToolSpec:
                     partial(find_references, index=index))
 
 
-def _todo_write_spec(workspace: Workspace) -> ToolSpec:
-    return ToolSpec("todo_write",
-                    f"Create or replace the agent task list. Each call "
-                    f"replaces the whole list (statuses: {', '.join(STATUSES)}; "
-                    "at most one in_progress). Use it to plan multi-step "
-                    "work and keep progress visible across turns.",
-                    {"type": "object", "properties": {
-                        "todos": {"type": "array",
-                                  "description": "The complete new task list",
-                                  "items": {"type": "object", "properties": {
-                                      "content": {"type": "string"},
-                                      "status": {"type": "string",
-                                                 "enum": list(STATUSES)}},
-                                      "required": ["content", "status"]}}},
-                     "required": ["todos"]},
-                    partial(todo_write, workspace=workspace))
-
-
 def _execute_code_spec(executor: ShellExecutor, workspace: Workspace) -> ToolSpec:
     return ToolSpec("execute_code",
                     "Write a complete script to the workspace and execute it "
@@ -296,7 +277,6 @@ def builtin_tool_specs(executor: ShellExecutor | None = None,
         _glob_files_spec(file_workspace),
         _find_symbol_spec(symbol_index),
         _find_references_spec(symbol_index),
-        _todo_write_spec(file_workspace),
         _execute_code_spec(shell_executor, file_workspace),
     ]
 

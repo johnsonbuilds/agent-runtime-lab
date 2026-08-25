@@ -408,15 +408,15 @@ class AgentTurn:
 
         for iteration in range(1, self.max_iterations + 1):
             try:
-                request_messages = apply_memory_strategy(
+                request_messages = await apply_memory_strategy(
                     messages, harness.memory.strategy)
                 if request_messages is not messages:
-                    trace.emit("memory.compact", iteration,
-                               original_chars=_message_list_chars(messages),
-                               request_chars=_message_list_chars(
-                                   request_messages),
-                               original_count=len(messages),
-                               request_count=len(request_messages))
+                    trace.emit(f"memory.{harness.memory.strategy}", iteration,
+                                original_chars=_message_list_chars(messages),
+                                request_chars=_message_list_chars(
+                                    request_messages),
+                                original_count=len(messages),
+                                request_count=len(request_messages))
                 logger.debug(
                     "llm.request.start iteration=%d messages=%d tools=%d stream=%s",
                     iteration, len(messages), len(tools.schemas), self.stream)
@@ -525,15 +525,15 @@ class AgentTurn:
                          harness.prompt.iteration_limit_notice})
         iteration = self.max_iterations + 1
         try:
-            request_messages = apply_memory_strategy(
+            request_messages = await apply_memory_strategy(
                 messages, harness.memory.strategy)
             if request_messages is not messages:
-                trace.emit("memory.compact", iteration,
-                           original_chars=_message_list_chars(messages),
-                           request_chars=_message_list_chars(
-                               request_messages),
-                           original_count=len(messages),
-                           request_count=len(request_messages))
+                trace.emit(f"memory.{harness.memory.strategy}", iteration,
+                            original_chars=_message_list_chars(messages),
+                            request_chars=_message_list_chars(
+                                request_messages),
+                            original_count=len(messages),
+                            request_count=len(request_messages))
             logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
                          iteration, len(request_messages), self.stream)
             with trace.span("llm", iteration,

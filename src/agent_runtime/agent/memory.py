@@ -14,16 +14,56 @@ preserved — a compacted tool message stays a tool message with the same
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
+from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONTEXT_BUDGET = 60_000
 DEFAULT_WINDOW_ROUNDS = 12
 DEFAULT_KEEP_RECENT_ROUNDS = 2
 DEFAULT_HEAD_CHARS = 200
+DEFAULT_SUMMARY_TAIL_ROUNDS = 2
 
 STRATEGY_FULL_HISTORY = "full_history"
 STRATEGY_COMPACT_OBSERVATIONS = "compact_observations"
+STRATEGY_LLM_SUMMARY = "llm_summary"
+
+SNAPSHOT_PREFIX = "[SYSTEM CONTEXT COMPACTION SNAPSHOT]\n"
+
+DEFAULT_SUMMARIZER_PROMPT = """\
+You are a context-compaction summarizer for a long-running autonomous agent. \
+You are given the conversation history. Produce a dense, structured snapshot of the CURRENT \
+execution state that a fresh reasoning step can rely on.
+
+Rules:
+- Output ONLY the markdown below, with no preamble and no code fences.
+- Focus strictly on tracking progress, active attempts, error lessons, and working context.
+- For every failed or blocked attempt, record the exact error and root-cause lesson to prevent repeated failures (avoid Sisyphean loops).
+- Be extremely specific with key entities, file paths, parameters, tool invocations, exit codes, and intermediate values.
+- Keep it concise, precise, and information-dense.
+
+Use exactly these sections:
+
+# Agent Context Snapshot
+
+## 1. Work State
+### Completed
+- ...
+### Active (In-Progress)
+- ...
+### Blocked / Failure Lessons
+- ...
+
+## 2. Next Move
+- ...
+
+## 3. Working Context & Anchors
+- **Relevant Files / Artifacts**: ...
+- **Environment State**: ..."""
 
 
 def _env_int(name: str, default: int) -> int:
@@ -167,9 +207,13 @@ def compact_observations(messages: list[dict[str, Any]], *,
     return result
 
 
-def apply_memory_strategy(messages: list[dict[str, Any]], strategy: str,
-                          **options: Any) -> list[dict[str, Any]]:
-    """Build the request view of ``messages`` for the given strategy."""
+async def apply_memory_strategy(messages: list[dict[str, Any]], strategy: str,
+                                 **options: Any) -> list[dict[str, Any]]:
+    """Build the request view of ``messages`` for the given strategy.
+
+    The ``llm_summary`` strategy uses its own summarizer LLM (see
+    :func:`_get_summary_llm`); the other strategies are deterministic.
+    """
     if strategy == STRATEGY_FULL_HISTORY:
         return messages
     if strategy == STRATEGY_COMPACT_OBSERVATIONS:
@@ -177,12 +221,117 @@ def apply_memory_strategy(messages: list[dict[str, Any]], strategy: str,
                     "window_rounds": _window_rounds()}
         defaults.update(options)
         return compact_observations(messages, **defaults)
+    if strategy == STRATEGY_LLM_SUMMARY:
+        return await summarize_history(messages, **options)
     raise ValueError(f"unknown memory strategy: {strategy!r}")
 
 
+_summary_llm: Any = None
+
+
+def set_summary_llm(llm: Any) -> None:
+    """Override the summarizer LLM (used by tests and custom wiring)."""
+    global _summary_llm
+    _summary_llm = llm
+
+
+def _get_summary_llm() -> Any:
+    """Lazily build the summarizer LLM used by ``llm_summary``.
+
+    A dedicated model can be selected via ``AGENT_RUNTIME_SUMMARY_MODEL`` so
+    summarization can run on a different (e.g. cheaper/faster) model than the
+    agent's main LLM; it otherwise falls back to the default model.
+    """
+    global _summary_llm
+    if _summary_llm is None:
+        from agent_runtime.providers.llm import OpenAICompatibleLLM
+        _summary_llm = OpenAICompatibleLLM(
+            model=os.getenv("AGENT_RUNTIME_SUMMARY_MODEL") or None)
+    return _summary_llm
+
+
+def _summary_tail_rounds() -> int:
+    return _env_int("AGENT_RUNTIME_SUMMARY_TAIL", DEFAULT_SUMMARY_TAIL_ROUNDS)
+
+
+def _session_memory_path() -> Path | None:
+    """Default on-disk location for the latest session snapshot.
+
+    ``AGENT_RUNTIME_WORKSPACE`` selects the root; the snapshot is written as
+    ``<workspace>/memory/session_memory.md`` (one file per task, overwritten).
+    """
+    workspace = os.getenv("AGENT_RUNTIME_WORKSPACE") or "."
+    return Path(workspace) / "memory" / "session_memory.md"
+
+
+def _write_session_memory(content: str, path: Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+async def _generate_snapshot(messages: list[dict[str, Any]], llm: Any,
+                            prompt: str | None) -> str:
+    """Ask the LLM for a structured snapshot of the full conversation."""
+    summarizer_messages: list[dict[str, Any]] = [
+        {"role": "system", "content": prompt or DEFAULT_SUMMARIZER_PROMPT}]
+    summarizer_messages.extend(messages)
+    response = await llm.chat(summarizer_messages, tools=None)
+    return response.get("content") or ""
+
+
+async def summarize_history(messages: list[dict[str, Any]], *,
+                           budget: int | None = None,
+                           tail_rounds: int | None = None,
+                           prompt: str | None = None,
+                           session_memory_path: Path | None = None
+                           ) -> list[dict[str, Any]]:
+    """Return a summarized copy of ``messages`` once over ``budget``.
+
+    The summarizer reads the FULL history and produces a structured snapshot
+    (see ``DEFAULT_SUMMARIZER_PROMPT``). The request view keeps the system
+    prompt and original task, injects the snapshot as a ``user`` message, and
+    appends the most recent ``tail_rounds`` rounds verbatim (preserving
+    tool-call pairs and short-term coherence). The snapshot is also written to
+    ``session_memory.md`` (overwriting any prior snapshot for this task).
+
+    Below budget, or when there are no older rounds to collapse, the original
+    list is returned unchanged. If the summarizer LLM call fails, the strategy
+    falls back to the deterministic ``compact_observations`` so the turn still
+    proceeds.
+    """
+    if budget is None:
+        budget = _context_budget()
+    if tail_rounds is None:
+        tail_rounds = _summary_tail_rounds()
+    llm = _get_summary_llm()
+    if _total_chars(messages) <= budget:
+        return messages
+    starts = _round_starts(messages)
+    total_rounds = len(starts)
+    if total_rounds <= tail_rounds:
+        return messages
+    logger.debug("memory.summary.start rounds=%d tail=%d", total_rounds, tail_rounds)
+    try:
+        snapshot = await _generate_snapshot(messages, llm, prompt)
+    except Exception:
+        logger.warning("memory.summary.failed falling back to compact_observations")
+        return compact_observations(messages, budget=budget)
+    leading = messages[:starts[0]]
+    tail_start = starts[-tail_rounds]
+    tail = messages[tail_start:]
+    snapshot_msg = {"role": "user", "content": SNAPSHOT_PREFIX + snapshot}
+    view = leading + [snapshot_msg] + tail
+    path = session_memory_path or _session_memory_path()
+    if path is not None:
+        await asyncio.to_thread(_write_session_memory, snapshot, path)
+    return view
+
+
 __all__ = [
-    "DEFAULT_CONTEXT_BUDGET", "DEFAULT_HEAD_CHARS",
+    "DEFAULT_CONTEXT_BUDGET", "DEFAULT_HEAD_CHARS", "DEFAULT_SUMMARY_TAIL_ROUNDS",
     "DEFAULT_KEEP_RECENT_ROUNDS", "DEFAULT_WINDOW_ROUNDS",
-    "STRATEGY_COMPACT_OBSERVATIONS", "STRATEGY_FULL_HISTORY",
-    "apply_memory_strategy", "compact_observations",
+    "STRATEGY_COMPACT_OBSERVATIONS", "STRATEGY_FULL_HISTORY", "STRATEGY_LLM_SUMMARY",
+    "apply_memory_strategy", "compact_observations", "set_summary_llm",
+    "summarize_history",
 ]

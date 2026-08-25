@@ -155,12 +155,6 @@ class CLIRenderer:
             return f"$ symbol {arguments.get('name')}"
         if (tool == "find_references" and isinstance(arguments, dict)):
             return f"$ refs {arguments.get('name')}"
-        if (tool == "todo_write" and isinstance(arguments, dict)
-                and isinstance(arguments.get("todos"), list)):
-            todos = arguments["todos"]
-            done = sum(1 for item in todos
-                       if isinstance(item, dict) and item.get("status") == "completed")
-            return f"todo {len(todos)} items ({done} done)"
         if (tool == "apply_patch" and isinstance(arguments, dict)
                 and isinstance(arguments.get("patch"), str)):
             blocks = arguments["patch"].count(">>>>>>> REPLACE")

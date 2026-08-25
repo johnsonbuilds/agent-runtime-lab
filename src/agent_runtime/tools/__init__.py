@@ -7,11 +7,10 @@ from .code import execute_code
 from .patch import apply_patch
 from .search import glob_files, grep_search
 from .symbols import TreeSitterIndex, find_references, find_symbol
-from .todo import todo_write
 
 __all__ = [
     "DEFAULT_READ_LIMIT", "ToolRegistry", "ToolSpec", "TreeSitterIndex",
     "apply_patch", "create_default_registry", "edit_file", "execute_code",
     "find_references", "find_symbol", "glob_files", "grep_search", "list_dir",
-    "read_file", "run_command", "todo_write", "write_file",
+    "read_file", "run_command", "write_file",
 ]

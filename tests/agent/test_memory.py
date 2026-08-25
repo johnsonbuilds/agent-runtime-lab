@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -8,8 +9,11 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from agent_runtime.agent.memory import (
     DEFAULT_CONTEXT_BUDGET,
+    SNAPSHOT_PREFIX,
     apply_memory_strategy,
     compact_observations,
+    set_summary_llm,
+    summarize_history,
 )
 
 
@@ -168,24 +172,107 @@ class CompactObservationsTests(unittest.TestCase):
                          arguments)
 
 
-class ApplyMemoryStrategyTests(unittest.TestCase):
-    def test_full_history_is_identity(self) -> None:
+class ApplyMemoryStrategyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_full_history_is_identity(self) -> None:
         messages = build_rounds(3, 100)
 
-        self.assertIs(apply_memory_strategy(messages, "full_history"),
+        self.assertIs(await apply_memory_strategy(messages, "full_history"),
                       messages)
 
-    def test_compact_strategy_is_routed(self) -> None:
+    async def test_compact_strategy_is_routed(self) -> None:
         messages = build_rounds(20, 5_000)
 
-        result = apply_memory_strategy(messages, "compact_observations",
-                                       budget=10_000, window_rounds=6)
+        result = await apply_memory_strategy(messages, "compact_observations",
+                                             budget=10_000, window_rounds=6)
 
         self.assertIn("observation compacted", result[3]["content"])
 
-    def test_unknown_strategy_is_rejected(self) -> None:
+    async def test_unknown_strategy_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown memory strategy"):
-            apply_memory_strategy([], "summarize")
+            await apply_memory_strategy([], "summarize")
+
+
+class FakeSummaryLLM:
+    def __init__(self, summary: str = "OBJECTIVE: summarized",
+                 *, error: Exception | None = None) -> None:
+        self.summary = summary
+        self.error = error
+        self.call_count = 0
+
+    async def chat(self, messages: list[dict[str, Any]],
+                   tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        self.call_count += 1
+        if self.error is not None:
+            raise self.error
+        return {"content": self.summary, "tool_calls": []}
+
+
+class SummarizeHistoryTests(unittest.IsolatedAsyncioTestCase):
+    def tearDown(self) -> None:
+        set_summary_llm(None)
+
+    async def test_below_budget_is_identity(self) -> None:
+        messages = build_rounds(3, 100)
+        llm = FakeSummaryLLM()
+        set_summary_llm(llm)
+        result = await summarize_history(messages, budget=DEFAULT_CONTEXT_BUDGET)
+        self.assertIs(result, messages)
+        self.assertEqual(llm.call_count, 0)
+
+    async def test_collapses_old_rounds_keeps_tail_and_task(self) -> None:
+        messages = build_rounds(10, 5_000)
+        llm = FakeSummaryLLM(summary="WORK STATE: mid-flight")
+        set_summary_llm(llm)
+        result = await summarize_history(messages, budget=1_000, tail_rounds=2)
+
+        self.assertIsNot(result, messages)
+        # system + original task preserved at the front
+        self.assertEqual(result[0]["content"], "sys")
+        self.assertEqual(result[1]["content"], "do the task")
+        # snapshot injected as a user message with the marker prefix
+        snapshot = result[2]
+        self.assertEqual(snapshot["role"], "user")
+        self.assertTrue(snapshot["content"].startswith(SNAPSHOT_PREFIX))
+        self.assertIn("WORK STATE: mid-flight", snapshot["content"])
+        # only the last two rounds survive as tool messages
+        self.assertEqual(sum(1 for m in result if m["role"] == "tool"), 2)
+        # tail (last 2 rounds) is verbatim
+        self.assertEqual(result[-4:], messages[-4:])
+
+    async def test_failure_falls_back_to_compact(self) -> None:
+        messages = build_rounds(20, 5_000)
+        llm = FakeSummaryLLM(error=RuntimeError("summarizer down"))
+        set_summary_llm(llm)
+        result = await summarize_history(messages, budget=10, tail_rounds=2)
+        # Deterministic compaction keeps the turn viable.
+        self.assertIn("observation compacted", result[3]["content"])
+
+    async def test_writes_session_memory_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "session_memory.md"
+            messages = build_rounds(10, 5_000)
+            set_summary_llm(FakeSummaryLLM(summary="LATEST SNAPSHOT"))
+            await summarize_history(messages, budget=1_000,
+                                    tail_rounds=2,
+                                    session_memory_path=path)
+            self.assertTrue(path.is_file())
+            self.assertIn("LATEST SNAPSHOT", path.read_text(encoding="utf-8"))
+
+
+class ApplyMemoryStrategyLLMRoutingTests(unittest.IsolatedAsyncioTestCase):
+    def tearDown(self) -> None:
+        set_summary_llm(None)
+
+    async def test_llm_summary_routes_to_summarizer(self) -> None:
+        messages = build_rounds(10, 5_000)
+        set_summary_llm(FakeSummaryLLM(summary="x"))
+        result = await apply_memory_strategy(
+            messages, "llm_summary", budget=1_000, tail_rounds=2)
+        self.assertEqual(sum(1 for m in result if m["role"] == "tool"), 2)
+
+    async def test_unknown_strategy_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            await apply_memory_strategy([], "bogus")
 
 
 if __name__ == "__main__":
