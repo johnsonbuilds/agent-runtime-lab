@@ -1,0 +1,19 @@
+{
+    "job_name": "2026-08-18__19-34-37",
+    "debug": true,
+    "agents": [
+        {
+            "name": "agent_runtime.integrations.harbor:HarborAgent"
+        }
+    ],
+    "datasets": [
+        {
+            "name": "terminal-bench/terminal-bench-2",
+            "ref": "sha256:c6fc2e2382c1dbae99b2d5ecd2f4f4a60c3c01e0d84642d69b4afd92e99d078b",
+            "task_names": [
+                "terminal-bench/fix-git"
+            ],
+            "n_tasks": 1
+        }
+    ]
+}

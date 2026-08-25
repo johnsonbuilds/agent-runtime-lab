@@ -1,0 +1,62 @@
+Hit:1 http://security.ubuntu.com/ubuntu noble-security InRelease
+Hit:2 http://archive.ubuntu.com/ubuntu noble InRelease
+Hit:3 http://archive.ubuntu.com/ubuntu noble-updates InRelease
+Hit:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following packages were automatically installed and are no longer required:
+  binutils binutils-common binutils-x86-64-linux-gnu build-essential bzip2
+  bzip2-doc cpp cpp-13 cpp-13-x86-64-linux-gnu cpp-x86-64-linux-gnu dirmngr
+  dpkg-dev fakeroot g++ g++-13 g++-13-x86-64-linux-gnu g++-x86-64-linux-gnu
+  gcc gcc-13 gcc-13-base gcc-13-x86-64-linux-gnu gcc-x86-64-linux-gnu gfortran
+  gfortran-13 gfortran-13-x86-64-linux-gnu gfortran-x86-64-linux-gnu gnupg
+  gnupg-l10n gnupg-utils gpg gpg-agent gpg-wks-client gpgconf gpgsm
+  icu-devtools keyboxd libalgorithm-diff-perl libalgorithm-diff-xs-perl
+  libalgorithm-merge-perl libaom3 libasan8 libatomic1 libbinutils libblas-dev
+  libbz2-dev libc-dev-bin libc-devtools libc6-dev libcc1-0 libcrypt-dev
+  libctf-nobfd0 libctf0 libdpkg-perl libdrm-amdgpu1 libdrm-common
+  libdrm-intel1 libdrm2 libedit2 libegl-mesa0 libelf1t64 libfakeroot
+  libfile-fcntllock-perl libgbm1 libgcc-13-dev libgd3 libgfortran-13-dev
+  libgl1-mesa-dri libglx-mesa0 libgprofng0 libheif-plugin-aomdec
+  libheif-plugin-aomenc libheif1 libhwasan0 libicu-dev libisl23 libitm1
+  libjansson4 libjpeg-dev libjpeg-turbo8-dev libjpeg8-dev libksba8
+  liblapack-dev libllvm20 liblocale-gettext-perl liblsan0 libmpc3 libmpfr6
+  libncurses-dev libncurses6 libpciaccess0 libpcre2-16-0 libpcre2-32-0
+  libpcre2-dev libpcre2-posix3 libpkgconf3 libpng-dev libpng-tools
+  libquadmath0 libreadline-dev libsensors-config libsensors5 libsframe1
+  libsqlite3-0 libstdc++-13-dev libtsan2 libubsan1 libvulkan1
+  libwayland-client0 libx11-xcb1 libxaw7 libxcb-dri3-0 libxcb-glx0
+  libxcb-present0 libxcb-randr0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0
+  libxcomposite1 libxcursor1 libxfixes3 libxi6 libxinerama1 libxkbfile1
+  libxmu6 libxmuu1 libxpm4 libxrandr2 libxshmfence1 libxtst6 libxv1
+  libxxf86dga1 libxxf86vm1 linux-libc-dev lto-disabled-list make manpages
+  manpages-dev mesa-libgallium mesa-vulkan-drivers patch pinentry-curses
+  rpcsvc-proto xauth xz-utils zlib1g-dev
+Use 'apt autoremove' to remove them.
+The following NEW packages will be installed:
+  curl
+0 upgraded, 1 newly installed, 0 to remove and 22 not upgraded.
+Need to get 227 kB of archives.
+After this operation, 535 kB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 curl amd64 8.5.0-2ubuntu10.12 [227 kB]
+debconf: delaying package configuration, since apt-utils is not installed
+Fetched 227 kB in 2s (148 kB/s)
+Selecting previously unselected package curl.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 19248 files and directories currently installed.)
+Preparing to unpack .../curl_8.5.0-2ubuntu10.12_amd64.deb ...
+Unpacking curl (8.5.0-2ubuntu10.12) ...
+Setting up curl (8.5.0-2ubuntu10.12) ...
+downloading uv 0.9.5 x86_64-unknown-linux-gnu
+no checksums to verify
+installing to /root/.local/bin
+  uv
+  uvx
+everything's installed!
+
+To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+    source $HOME/.local/bin/env (sh, bash, zsh)
+    source $HOME/.local/bin/env.fish (fish)
+Downloading cpython-3.13.9-linux-x86_64-gnu (download) (32.0MiB)

@@ -1,0 +1,37 @@
+{
+    "id": "6c0e9772-7282-4233-8dd2-9f6cb90590ed",
+    "started_at": "2026-08-22T18:33:46.518735",
+    "updated_at": "2026-08-22T18:58:10.710758",
+    "finished_at": "2026-08-22T18:58:10.710758",
+    "n_total_trials": 1,
+    "stats": {
+        "n_completed_trials": 1,
+        "n_errored_trials": 1,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "agent-runtime-lab__terminal-bench/terminal-bench-2": {
+                "n_trials": 0,
+                "n_errors": 1,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {},
+                "exception_stats": {
+                    "VerifierTimeoutError": [
+                        "adaptive-rejection-sampler__pm2V7gP"
+                    ]
+                }
+            }
+        },
+        "n_input_tokens": null,
+        "n_cache_tokens": null,
+        "n_output_tokens": null,
+        "cost_usd": null
+    }
+}

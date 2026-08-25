@@ -1,0 +1,136 @@
+{
+    "id": "7b9913fb-e0f8-468f-bed7-28094dcbc20f",
+    "task_name": "terminal-bench/fix-git",
+    "trial_name": "fix-git__8MUoxRX",
+    "trial_uri": "file:///home/jun/.hermes/workspace/agent-runtime-lab/jobs/2026-08-18__19-34-37/fix-git__8MUoxRX",
+    "task_id": {
+        "org": "terminal-bench",
+        "name": "fix-git",
+        "ref": "sha256:66be7179f07f1aa8f0d60f88800a883a68c1ffb7a349aae76aa60fa679485473"
+    },
+    "source": "terminal-bench/terminal-bench-2",
+    "task_checksum": "e17451b4a53685be804467ab24e53c4f5816bf6a972ff6434ec20cc7d246048e",
+    "config": {
+        "task": {
+            "path": null,
+            "git_url": null,
+            "git_commit_id": null,
+            "name": "terminal-bench/fix-git",
+            "ref": "sha256:66be7179f07f1aa8f0d60f88800a883a68c1ffb7a349aae76aa60fa679485473",
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench/terminal-bench-2"
+        },
+        "trial_name": "fix-git__8MUoxRX",
+        "trials_dir": "jobs/2026-08-18__19-34-37",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "agent_runtime.integrations.harbor:HarborAgent",
+            "import_path": null,
+            "model_name": null,
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "88a90115-30d3-4bbb-8f3e-a776e9718d16",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "agent-runtime-lab",
+        "version": "0.1.0",
+        "model_info": null
+    },
+    "agent_result": {
+        "n_input_tokens": null,
+        "n_cache_tokens": null,
+        "n_output_tokens": null,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": {
+            "agent_runtime": {
+                "instruction": "I just made some changes to my personal site and checked out master, but now I can't find those changes. Please help me find them and merge them into master.\n",
+                "trace_path": "jobs/2026-08-18__19-34-37/fix-git__8MUoxRX/agent/agent-runtime.jsonl",
+                "event_count": 6,
+                "status": "failed",
+                "last_event": {
+                    "run_id": "run-fd60abcc052544a3bf9e5aaf727c3e90",
+                    "event_id": "evt-b6d02b5fd6fe4dcc9d8cddcb4b76fe85",
+                    "event_type": "agent.end",
+                    "timestamp": 1787053067.2989252,
+                    "iteration": 0,
+                    "data": {
+                        "stage": "llm",
+                        "error": "LLM error: LLM stream produced no chunk for 180 seconds",
+                        "duration_ms": 180101.36,
+                        "status": "error"
+                    }
+                },
+                "answer": "LLM error: LLM stream produced no chunk for 180 seconds",
+                "error": "LLM error: LLM stream produced no chunk for 180 seconds"
+            }
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 0.0
+        }
+    },
+    "verifier_environment_mode": "shared",
+    "exception_info": null,
+    "started_at": "2026-08-18T11:34:45.954101Z",
+    "finished_at": "2026-08-18T11:38:13.110520Z",
+    "environment_setup": {
+        "started_at": "2026-08-18T11:34:45.979563Z",
+        "finished_at": "2026-08-18T11:34:47.195325Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-08-18T11:34:47.195369Z",
+        "finished_at": "2026-08-18T11:34:47.195423Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-08-18T11:34:47.195497Z",
+        "finished_at": "2026-08-18T11:37:47.300288Z"
+    },
+    "verifier": {
+        "started_at": "2026-08-18T11:37:47.938387Z",
+        "finished_at": "2026-08-18T11:38:02.024020Z"
+    },
+    "step_results": null
+}
