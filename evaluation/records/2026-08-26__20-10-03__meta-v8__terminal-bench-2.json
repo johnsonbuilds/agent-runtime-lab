@@ -1,0 +1,30 @@
+{
+  "record_id": "2026-08-26__20-10-03__meta-v8__terminal-bench-2",
+  "created_at": "2026-08-26T20:32:28",
+  "harness_id": "meta-v8",
+  "genes_hash": "8bcb00cac3f810e6",
+  "model": "inclusionai/ling-3.0-flash",
+  "benchmark": "terminal-bench/terminal-bench-2",
+  "job_dir": "jobs/2026-08-26__20-10-03",
+  "git_commit": "476d79e",
+  "score": {
+    "passed": 1,
+    "failed": 0,
+    "errored": 0,
+    "cancelled": 0,
+    "unjudged_completed": 0,
+    "total": 1,
+    "rate": 1.0
+  },
+  "tasks": [
+    {
+      "task": "terminal-bench/adaptive-rejection-sampler",
+      "trial": "adaptive-rejection-sampler__E36jboF",
+      "status": "passed",
+      "reward": 1.0,
+      "trace": "jobs/2026-08-26__20-10-03/adaptive-rejection-sampler__E36jboF/agent/agent-runtime.jsonl",
+      "failure_mode": null
+    }
+  ],
+  "notes": "medium task:adaptive-rejection-sampler passed in 17 iteration"
+}
