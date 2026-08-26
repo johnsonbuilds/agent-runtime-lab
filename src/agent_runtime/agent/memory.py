@@ -210,23 +210,50 @@ def compact_observations(messages: list[dict[str, Any]], *,
     return result
 
 
-async def apply_memory_strategy(messages: list[dict[str, Any]], strategy: str,
-                                 **options: Any) -> list[dict[str, Any]]:
+async def apply_memory_strategy(messages: list[dict[str, Any]], strategy: str, *,
+                                compact_messages: list[dict[str, Any]] | None = None,
+                                trace: Any = None, iteration: int | None = None,
+                                **options: Any) -> list[dict[str, Any]]:
     """Build the request view of ``messages`` for the given strategy.
 
-    The ``llm_summary`` strategy uses its own summarizer LLM (see
-    :func:`_get_summary_llm`); the other strategies are deterministic.
+    ``messages`` is the FULL conversation (the source of truth, never mutated
+    here). ``compact_messages`` is the working/compacted view carried across
+    turns: it is used *only* to decide whether a re-compaction is due (its size
+    vs the context budget), while the actual compaction always summarizes or
+    compacts the FULL history. This keeps the per-turn request bounded and
+    avoids re-compacting on every iteration.
+
+    When a re-compaction actually produces a new view, a ``memory.{strategy}``
+    event is emitted on ``trace`` (if provided) so the caller stays free of
+    strategy logic.
     """
     if strategy == STRATEGY_FULL_HISTORY:
         return messages
+    if strategy not in (STRATEGY_COMPACT_OBSERVATIONS, STRATEGY_LLM_SUMMARY):
+        raise ValueError(f"unknown memory strategy: {strategy!r}")
+
+    budget = options.get("budget") or _context_budget()
+    working = compact_messages if compact_messages is not None else messages
+    if _total_chars(working) <= budget:
+        return working
+
     if strategy == STRATEGY_COMPACT_OBSERVATIONS:
-        defaults = {"budget": _context_budget(),
-                    "window_rounds": _window_rounds()}
-        defaults.update(options)
-        return compact_observations(messages, **defaults)
-    if strategy == STRATEGY_LLM_SUMMARY:
-        return await summarize_history(messages, **options)
-    raise ValueError(f"unknown memory strategy: {strategy!r}")
+        result = compact_observations(messages, budget=budget,
+                                     window_rounds=_window_rounds())
+    else:  # STRATEGY_LLM_SUMMARY
+        result = await summarize_history(
+            messages, budget=budget,
+            tail_rounds=options.get("tail_rounds"),
+            prompt=options.get("prompt"),
+            session_memory_path=options.get("session_memory_path"))
+
+    if trace is not None and result is not working and result is not messages:
+        trace.emit(f"memory.{strategy}", iteration,
+                   original_chars=_total_chars(messages),
+                   request_chars=_total_chars(result),
+                   original_count=len(messages),
+                   request_count=len(result))
+    return result
 
 
 _summary_llm: Any = None

@@ -33,7 +33,6 @@ def _message_list_chars(messages: list[dict[str, Any]]) -> int:
             total += len((call.get("function") or {}).get("arguments") or "")
     return total
 
-
 def _stream_idle_timeout() -> float | None:
     raw = os.getenv("AGENT_RUNTIME_STREAM_IDLE_TIMEOUT", "120")
     try:
@@ -241,20 +240,19 @@ def _rejected_observation_content(tool_call: Any, observation: str) -> str:
     return f"Tool call to {name} was rejected and not executed. {observation}"
 
 
-def _append_rejected_observation(messages: list[dict[str, Any]], tool_call: Any,
-                                 content: str) -> None:
-    """Observe a tool call rejected before execution.
+def _rejected_observation_message(tool_call: Any, content: str) -> dict[str, Any]:
+    """Build the observation message for a tool call rejected before execution.
 
-    The rejected call never enters the conversation history, so the
-    observation must be a user message: a ``role: "tool"`` message would
-    reference a tool_call_id that no assistant message carries.
+    The rejected call never enters the conversation history, so the observation
+    must be a user message: a ``role: "tool"`` message would reference a
+    tool_call_id that no assistant message carries.
     """
     call_id = tool_call.get("id") if isinstance(tool_call, Mapping) else None
     if isinstance(call_id, str) and call_id:
         retry = "Please retry this tool call with valid JSON arguments."
     else:
         retry = "Please retry this tool call with a valid tool_call_id."
-    messages.append({"role": "user", "content": f"{content} {retry}"})
+    return {"role": "user", "content": f"{content} {retry}"}
 
 
 def _trace_tool_rejection(trace: RunTrace, iteration: int,
@@ -405,27 +403,30 @@ class AgentTurn:
         events.emit("agent.started", message=self.user_message)
         _ensure_system_prompt(self.conversation, harness.prompt.system)
         self.conversation.append({"role": "user", "content": self.user_message})
+        # Working/compacted view carried across turns. The full ``messages`` is
+        # the source of truth; ``compact_messages`` is what actually gets sent to
+        # the model (and what the budget gate watches). It starts as an independent
+        # copy of the initialized conversation so the two never alias.
+        compact_messages = list(self.conversation.messages)
 
         for iteration in range(1, self.max_iterations + 1):
             try:
-                request_messages = await apply_memory_strategy(
-                    messages, harness.memory.strategy)
-                if request_messages is not messages:
-                    trace.emit(f"memory.{harness.memory.strategy}", iteration,
-                                original_chars=_message_list_chars(messages),
-                                request_chars=_message_list_chars(
-                                    request_messages),
-                                original_count=len(messages),
-                                request_count=len(request_messages))
+                new_view = await apply_memory_strategy(
+                    messages, harness.memory.strategy,
+                    compact_messages=compact_messages, trace=trace, iteration=iteration)
+                # ``full_history`` returns ``messages`` itself; never let the
+                # working view alias the full list or mirrored appends double up.
+                if new_view is not messages:
+                    compact_messages = new_view
                 logger.debug(
                     "llm.request.start iteration=%d messages=%d tools=%d stream=%s",
                     iteration, len(messages), len(tools.schemas), self.stream)
                 with trace.span("llm", iteration,
-                                message_count=len(request_messages),
+                                message_count=len(compact_messages),
                                 tool_count=len(tools.schemas),
-                                messages=list(request_messages)) as span_meta:
+                                messages=list(compact_messages)) as span_meta:
                     response = await self._chat_response(
-                        request_messages, tools.schemas, iteration)
+                        compact_messages, tools.schemas, iteration)
                     tool_calls = response.get("tool_calls") or []
                     content = response.get("content") or ""
 
@@ -448,14 +449,18 @@ class AgentTurn:
                     "llm.reasoning_budget_exceeded iteration=%d %s", iteration, exc)
                 messages.append({"role": "assistant",
                                  "content": "(extended reasoning omitted)"})
-                messages.append({
+                compact_messages.append({"role": "assistant",
+                                         "content": "(extended reasoning omitted)"})
+                nudge = {
                     "role": "user",
                     "content": (
                         f"Your last turn produced {exc.reasoning_chars} characters "
                         f"of reasoning without any content or tool calls. Stop "
                         f"reasoning and act now: call a tool, or give your "
                         f"final answer."),
-                })
+                }
+                messages.append(nudge)
+                compact_messages.append(nudge)
                 continue
             except Exception as exc:
                 logger.error("llm.request.error iteration=%d error=%s", iteration, exc)
@@ -477,6 +482,7 @@ class AgentTurn:
                 assistant_message["tool_calls"] = canonical_calls
             if tool_calls or content or reasoning_content:
                 messages.append(assistant_message)
+                compact_messages.append(assistant_message)
 
             if not tool_calls:
                 answer = response.get("content", "")
@@ -495,7 +501,9 @@ class AgentTurn:
                             tool=payload["tool"], arguments=payload["arguments"])
                 tool_started = time.monotonic()
                 if outcome.rejection is not None:
-                    self._reject_tool_call(outcome, iteration, messages)
+                    observation = self._reject_tool_call(outcome, iteration)
+                    messages.append(observation)
+                    compact_messages.append(observation)
                     continue
                 validated = outcome.validated
                 try:
@@ -518,29 +526,29 @@ class AgentTurn:
                     observation = harness.tool_error_observation(
                         exc, tool=payload["tool"])
                     _append_tool_observation(messages, tool_call, observation)
+                    _append_tool_observation(compact_messages, tool_call, observation)
                     continue
                 _append_tool_observation(messages, tool_call, str(result))
+                _append_tool_observation(compact_messages, tool_call, str(result))
 
         messages.append({"role": "user", "content":
                          harness.prompt.iteration_limit_notice})
+        compact_messages.append({"role": "user", "content":
+                                harness.prompt.iteration_limit_notice})
         iteration = self.max_iterations + 1
         try:
-            request_messages = await apply_memory_strategy(
-                messages, harness.memory.strategy)
-            if request_messages is not messages:
-                trace.emit(f"memory.{harness.memory.strategy}", iteration,
-                            original_chars=_message_list_chars(messages),
-                            request_chars=_message_list_chars(
-                                request_messages),
-                            original_count=len(messages),
-                            request_count=len(request_messages))
+            new_view = await apply_memory_strategy(
+                messages, harness.memory.strategy,
+                compact_messages=compact_messages, trace=trace, iteration=iteration)
+            if new_view is not messages:
+                compact_messages = new_view
             logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
-                         iteration, len(request_messages), self.stream)
+                         iteration, len(compact_messages), self.stream)
             with trace.span("llm", iteration,
-                            message_count=len(request_messages), tool_count=0,
-                            messages=list(request_messages)) as span_meta:
+                            message_count=len(compact_messages), tool_count=0,
+                            messages=list(compact_messages)) as span_meta:
                 response = await self._chat_response(
-                    request_messages, None, iteration)
+                    compact_messages, None, iteration)
                 span_meta.update(tool_count=0, tools=[], final=True)
                 logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",
                              iteration, len(response.get("content") or ""))
@@ -567,9 +575,14 @@ class AgentTurn:
         events.emit("agent.completed", iteration, iterations=iteration, answer=answer)
         return answer
 
-    def _reject_tool_call(self, outcome: ToolCallOutcome, iteration: int,
-                          messages: list[dict[str, Any]]) -> None:
-        """Observe a tool call rejected by validation; it never executed."""
+    def _reject_tool_call(self, outcome: ToolCallOutcome, iteration: int
+                          ) -> dict[str, Any]:
+        """Observe a tool call rejected by validation; it never executed.
+
+        Side-effects (logging / trace events) happen exactly once here; the
+        returned observation message is the caller's responsibility to record in
+        every conversation view (so the working/compacted view stays in sync).
+        """
         tool_call = outcome.tool_call
         rejection = outcome.rejection
         assert rejection is not None
@@ -583,7 +596,7 @@ class AgentTurn:
         observation = _rejected_observation_content(
             tool_call,
             self.harness.tool_error_observation(rejection, tool=payload["tool"]))
-        _append_rejected_observation(messages, tool_call, observation)
+        return _rejected_observation_message(tool_call, observation)
 
     async def _chat_response(self, messages: list[dict[str, Any]],
                              tools: list[dict[str, Any]] | None,
