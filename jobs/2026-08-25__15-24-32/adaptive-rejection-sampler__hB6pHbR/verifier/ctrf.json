@@ -1,0 +1,107 @@
+{
+    "results": {
+        "tool": {
+            "name": "pytest",
+            "version": "8.4.1"
+        },
+        "summary": {
+            "tests": 9,
+            "passed": 7,
+            "failed": 2,
+            "skipped": 0,
+            "pending": 0,
+            "other": 0,
+            "start": 1787665214.6175349,
+            "stop": 1787665218.0435393
+        },
+        "tests": [
+            {
+                "name": "test_outputs.py::test_ars_function_exists",
+                "status": "passed",
+                "duration": 0.0018923310017271433,
+                "start": 1787665215.3991013,
+                "stop": 1787665215.4020994,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_can_generate_standard_distribution_samples",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.6260421840015624,
+                "start": 1787665215.402394,
+                "stop": 1787665216.0777936,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_can_generate_standard_distribution_samples():\n        \"\"\"Test implementation can generate samples from standard distributions.\"\"\"\n        app_dir = Path(\"/app\")\n    \n        # Test R implementation by sourcing ars.R and running tests\n        test_code_r = \"\"\"\n    library(stats)\n    \n    # Source the required ars.R file\n    source(\"ars.R\")\n    \n    # Test normal distribution sampling\n    normal_density <- function(x) {\n        dnorm(x, mean = 0, sd = 1)\n    }\n    \n    # Try to generate samples\n    tryCatch({\n        samples <- ars(normal_density, c(-5, 5), n = 1000)\n    \n        if (length(samples) >= 900) {  # Allow some tolerance\n            mean_val <- mean(samples)\n            std_val <- sd(samples)\n    \n            if (abs(mean_val) < 0.2 && std_val > 0.8 && std_val < 1.2) {\n                cat(\"PASS: Generated valid normal samples\\n\")\n            } else {\n                cat(\"ERROR: Mean or std out of range\\n\")\n            }\n        } else {\n            cat(\"ERROR: Insufficient samples generated\\n\")\n        }\n    }, error = function(e) {\n        cat(\"ERROR: Failed to generate samples:\", conditionMessage(e), \"\\n\")\n    })\n    \"\"\"\n    \n        # Run R test\n        test_file = app_dir / \"test_normal_sampler.R\"\n        test_file.write_text(test_code_r)\n        try:\n            result = subprocess.run(\n                [\"Rscript\", str(test_file)],\n                capture_output=True,\n                text=True,\n                cwd=str(app_dir),\n                timeout=30,\n            )\n            output = result.stdout + result.stderr\n>           assert \"PASS\" in output, (\n                f\"Failed to generate valid normal samples. Output: {output}\"\n            )\nE           AssertionError: Failed to generate valid normal samples. Output: ERROR: Failed to generate samples: ars: 'lower' must be a single non-missing numeric value. \nE             \nE           assert 'PASS' in \"ERROR: Failed to generate samples: ars: 'lower' must be a single non-missing numeric value. \\n\"\n\n/tests/test_outputs.py:81: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_has_test_function",
+                "status": "passed",
+                "duration": 0.0016195899988815654,
+                "start": 1787665216.0782473,
+                "stop": 1787665216.0800993,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_formal_testing_with_known_truth",
+                "status": "passed",
+                "duration": 0.8991685850014619,
+                "start": 1787665216.0803797,
+                "stop": 1787665216.9799452,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_sample_files_generated",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.0010891519996221177,
+                "start": 1787665216.9803166,
+                "stop": 1787665216.986865,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_sample_files_generated():\n        \"\"\"Test that required sample files are generated.\"\"\"\n        app_dir = Path(\"/app\")\n    \n        # Check for required sample files as specified in task\n        normal_file = app_dir / \"normal_samples.txt\"\n        exp_file = app_dir / \"exponential_samples.txt\"\n    \n>       assert normal_file.exists() or exp_file.exists(), (\n            \"At least one sample file must be generated. Task requires generating 'normal_samples.txt' \"\n            \"or 'exponential_samples.txt' containing test samples\"\n        )\nE       AssertionError: At least one sample file must be generated. Task requires generating 'normal_samples.txt' or 'exponential_samples.txt' containing test samples\nE       assert (False or False)\nE        +  where False = exists()\nE        +    where exists = PosixPath('/app/normal_samples.txt').exists\nE        +  and   False = exists()\nE        +    where exists = PosixPath('/app/exponential_samples.txt').exists\n\n/tests/test_outputs.py:161: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_implementation_is_modular",
+                "status": "passed",
+                "duration": 0.001203036001243163,
+                "start": 1787665216.987198,
+                "stop": 1787665216.9887145,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_implementation_handles_errors",
+                "status": "passed",
+                "duration": 0.0008892669975466561,
+                "start": 1787665216.988959,
+                "stop": 1787665216.9900212,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_input_validation_functionality",
+                "status": "passed",
+                "duration": 0.5667954219970852,
+                "start": 1787665216.990254,
+                "stop": 1787665217.5578587,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_log_concavity_functionality",
+                "status": "passed",
+                "duration": 0.483679688997654,
+                "start": 1787665217.558307,
+                "stop": 1787665218.0424042,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            }
+        ]
+    }
+}
