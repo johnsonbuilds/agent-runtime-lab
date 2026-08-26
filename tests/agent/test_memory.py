@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from agent_runtime.agent.memory import (
     DEFAULT_CONTEXT_BUDGET,
-    SNAPSHOT_PREFIX,
+    SUMMARY_PREFIX,
     apply_memory_strategy,
     compact_observations,
     set_summary_llm,
@@ -229,11 +229,11 @@ class SummarizeHistoryTests(unittest.IsolatedAsyncioTestCase):
         # system + original task preserved at the front
         self.assertEqual(result[0]["content"], "sys")
         self.assertEqual(result[1]["content"], "do the task")
-        # snapshot injected as a user message with the marker prefix
-        snapshot = result[2]
-        self.assertEqual(snapshot["role"], "user")
-        self.assertTrue(snapshot["content"].startswith(SNAPSHOT_PREFIX))
-        self.assertIn("WORK STATE: mid-flight", snapshot["content"])
+        # summary injected as a user message with the marker prefix
+        summary = result[2]
+        self.assertEqual(summary["role"], "user")
+        self.assertTrue(summary["content"].startswith(SUMMARY_PREFIX))
+        self.assertIn("WORK STATE: mid-flight", summary["content"])
         # only the last two rounds survive as tool messages
         self.assertEqual(sum(1 for m in result if m["role"] == "tool"), 2)
         # tail (last 2 rounds) is verbatim

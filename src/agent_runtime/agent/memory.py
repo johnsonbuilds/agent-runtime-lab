@@ -32,11 +32,14 @@ STRATEGY_FULL_HISTORY = "full_history"
 STRATEGY_COMPACT_OBSERVATIONS = "compact_observations"
 STRATEGY_LLM_SUMMARY = "llm_summary"
 
-SNAPSHOT_PREFIX = "[SYSTEM CONTEXT COMPACTION SNAPSHOT]\n"
+SUMMARY_PREFIX = "[SYSTEM CONTEXT COMPACTION SUMMARY]\n"
 
-DEFAULT_SUMMARIZER_PROMPT = """\
-You are a context-compaction summarizer for a long-running autonomous agent. \
-You are given the conversation history. Produce a dense, structured snapshot of the CURRENT \
+SUMMARIZER_SYSTEM = (
+    "You are a professional context-compaction summarizer for an agent."
+)
+
+SUMMARIZER_INSTRUCTION = """\
+Analyze the conversation history above. Produce a dense, structured summary of the CURRENT \
 execution state that a fresh reasoning step can rely on.
 
 Rules:
@@ -255,9 +258,9 @@ def _summary_tail_rounds() -> int:
 
 
 def _session_memory_path() -> Path | None:
-    """Default on-disk location for the latest session snapshot.
+    """Default on-disk location for the latest session summary.
 
-    ``AGENT_RUNTIME_WORKSPACE`` selects the root; the snapshot is written as
+    ``AGENT_RUNTIME_WORKSPACE`` selects the root; the summary is written as
     ``<workspace>/memory/session_memory.md`` (one file per task, overwritten).
     """
     workspace = os.getenv("AGENT_RUNTIME_WORKSPACE") or "."
@@ -270,12 +273,36 @@ def _write_session_memory(content: str, path: Path) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-async def _generate_snapshot(messages: list[dict[str, Any]], llm: Any,
+def _strip_leading_system(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop any leading ``system`` messages (the agent's persona/system prompt).
+
+    The summarizer must see the interaction *history*, not be re-primed with the
+    agent's own system prompt, which would make it re-enter the agent/tool-calling
+    role and emit a tool call instead of a summary.
+    """
+    index = 0
+    while index < len(messages) and messages[index].get("role") == "system":
+        index += 1
+    return messages[index:]
+
+
+async def _generate_summary(messages: list[dict[str, Any]], llm: Any,
                             prompt: str | None) -> str:
-    """Ask the LLM for a structured snapshot of the full conversation."""
+    """Ask the LLM for a structured summary of the full conversation.
+
+    The payload is assembled as: a fixed summarizer-identity system message, the
+    raw interaction history (agent system prompt stripped), and a final user
+    instruction carrying the extraction schema. Ordering the instruction last
+    exploits recency to dominate the model's output, and removing the agent's
+    system prompt stops the model from imitating the agent's tool calls.
+    """
+    history = _strip_leading_system(messages)
+    instruction = prompt or SUMMARIZER_INSTRUCTION
     summarizer_messages: list[dict[str, Any]] = [
-        {"role": "system", "content": prompt or DEFAULT_SUMMARIZER_PROMPT}]
-    summarizer_messages.extend(messages)
+        {"role": "system", "content": SUMMARIZER_SYSTEM},
+        *history,
+        {"role": "user", "content": instruction},
+    ]
     response = await llm.chat(summarizer_messages, tools=None)
     return response.get("content") or ""
 
@@ -288,12 +315,12 @@ async def summarize_history(messages: list[dict[str, Any]], *,
                            ) -> list[dict[str, Any]]:
     """Return a summarized copy of ``messages`` once over ``budget``.
 
-    The summarizer reads the FULL history and produces a structured snapshot
-    (see ``DEFAULT_SUMMARIZER_PROMPT``). The request view keeps the system
-    prompt and original task, injects the snapshot as a ``user`` message, and
+    The summarizer reads the FULL history and produces a structured summary
+    (see ``SUMMARIZER_INSTRUCTION``). The request view keeps the system
+    prompt and original task, injects the summary as a ``user`` message, and
     appends the most recent ``tail_rounds`` rounds verbatim (preserving
-    tool-call pairs and short-term coherence). The snapshot is also written to
-    ``session_memory.md`` (overwriting any prior snapshot for this task).
+    tool-call pairs and short-term coherence). The summary is also written to
+    ``session_memory.md`` (overwriting any prior summary for this task).
 
     Below budget, or when there are no older rounds to collapse, the original
     list is returned unchanged. If the summarizer LLM call fails, the strategy
@@ -313,18 +340,18 @@ async def summarize_history(messages: list[dict[str, Any]], *,
         return messages
     logger.debug("memory.summary.start rounds=%d tail=%d", total_rounds, tail_rounds)
     try:
-        snapshot = await _generate_snapshot(messages, llm, prompt)
+        summary = await _generate_summary(messages, llm, prompt)
     except Exception:
         logger.warning("memory.summary.failed falling back to compact_observations")
         return compact_observations(messages, budget=budget)
     leading = messages[:starts[0]]
     tail_start = starts[-tail_rounds]
     tail = messages[tail_start:]
-    snapshot_msg = {"role": "user", "content": SNAPSHOT_PREFIX + snapshot}
-    view = leading + [snapshot_msg] + tail
+    summary_msg = {"role": "user", "content": SUMMARY_PREFIX + summary}
+    view = leading + [summary_msg] + tail
     path = session_memory_path or _session_memory_path()
     if path is not None:
-        await asyncio.to_thread(_write_session_memory, snapshot, path)
+        await asyncio.to_thread(_write_session_memory, summary, path)
     return view
 
 
