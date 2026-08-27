@@ -1,8 +1,8 @@
-# Agent Runtime Lab
+# SunAgent
 
 > A modular AI Agent runtime implementation built from scratch for understanding, experimenting, and extending modern AI Agent architectures.
 
-Agent Runtime Lab is an open-source project that explores the core components behind AI Agent systems.
+SunAgent is an open-source project that explores the core components behind AI Agent systems.
 
 Instead of treating agents as black-box applications, this project focuses on understanding and implementing the underlying runtime mechanisms:
 
