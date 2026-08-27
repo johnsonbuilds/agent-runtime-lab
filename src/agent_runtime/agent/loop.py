@@ -25,13 +25,6 @@ from agent_runtime.trace import RunTrace
 logger = logging.getLogger(__name__)
 
 
-def _message_list_chars(messages: list[dict[str, Any]]) -> int:
-    total = 0
-    for message in messages:
-        total += len(message.get("content") or "")
-        for call in message.get("tool_calls") or []:
-            total += len((call.get("function") or {}).get("arguments") or "")
-    return total
 
 def _stream_idle_timeout() -> float | None:
     raw = os.getenv("AGENT_RUNTIME_STREAM_IDLE_TIMEOUT", "120")
