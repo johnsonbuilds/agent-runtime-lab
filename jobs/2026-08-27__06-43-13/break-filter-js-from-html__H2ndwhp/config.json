@@ -1,0 +1,13 @@
+{
+    "task": {
+        "name": "terminal-bench/break-filter-js-from-html",
+        "ref": "sha256:59a2641df9bca789642ad4ab3f5790de5ffed6eb4a594ca7846d26422a55c4a8",
+        "source": "terminal-bench/terminal-bench-2"
+    },
+    "trial_name": "break-filter-js-from-html__H2ndwhp",
+    "trials_dir": "jobs/2026-08-27__06-43-13",
+    "agent": {
+        "name": "agent_runtime.integrations.harbor:HarborAgent"
+    },
+    "job_id": "49279f32-f225-459c-a087-d5846e6f773c"
+}
