@@ -1,0 +1,90 @@
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/root/agent-runtime-lab/src/agent_runtime/integrations/harbor.py", line 92, in run
+    answer = await run_turn(instruction, self.llm, tools,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/src/agent_runtime/agent/loop.py", line 718, in run_turn
+    return await AgentTurn(user_message, llm, tools, max_iterations,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/src/agent_runtime/agent/loop.py", line 384, in run
+    return await self._run(agent_meta)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/src/agent_runtime/agent/loop.py", line 428, in _run
+    response = await self._chat_response(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/src/agent_runtime/agent/loop.py", line 615, in _chat_response
+    response = await self._consume_stream(messages, tools, iteration)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/src/agent_runtime/agent/loop.py", line 639, in _consume_stream
+    chunk = await anext(stream_iterator)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/src/agent_runtime/providers/llm.py", line 69, in stream
+    async for chunk in response:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 158, in __aiter__
+    async for item in self._iterator:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 172, in __stream__
+    async for sse in iterator:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 162, in _iter_events
+    async for sse in self._decoder.aiter_bytes(self.response.aiter_bytes()):
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 319, in aiter_bytes
+    async for chunk in self._aiter_chunks(iterator):
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 330, in _aiter_chunks
+    async for chunk in iterator:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpx/_models.py", line 997, in aiter_bytes
+    async for raw_bytes in self.aiter_raw():
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpx/_models.py", line 1055, in aiter_raw
+    async for raw_stream_bytes in self.stream:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpx/_client.py", line 176, in __aiter__
+    async for chunk in self._stream:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpx/_transports/default.py", line 271, in __aiter__
+    async for part in self._httpcore_stream:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpcore/_async/connection_pool.py", line 407, in __aiter__
+    raise exc from None
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpcore/_async/connection_pool.py", line 403, in __aiter__
+    async for part in self._stream:
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpcore/_async/http11.py", line 342, in __aiter__
+    raise exc
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpcore/_async/http11.py", line 334, in __aiter__
+    async for chunk in self._connection._receive_response_body(**kwargs):
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpcore/_async/http11.py", line 203, in _receive_response_body
+    event = await self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpcore/_async/http11.py", line 217, in _receive_event
+    data = await self._network_stream.read(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/httpcore/_backends/anyio.py", line 35, in read
+    return await self._stream.receive(max_bytes=max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/anyio/streams/tls.py", line 254, in receive
+    data = await self._call_sslobject_method(self._ssl_object.read, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/anyio/streams/tls.py", line 194, in _call_sslobject_method
+    data = await self.transport_stream.receive()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 1337, in receive
+    await self._protocol.read_event.wait()
+  File "/usr/lib/python3.12/asyncio/locks.py", line 212, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/harbor/trial/trial.py", line 480, in _run_agent_phase
+    await asyncio.wait_for(
+  File "/usr/lib/python3.12/asyncio/tasks.py", line 519, in wait_for
+    async with timeouts.timeout(timeout):
+  File "/usr/lib/python3.12/asyncio/timeouts.py", line 115, in __aexit__
+    raise TimeoutError from exc_val
+TimeoutError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/harbor/trial/single_step.py", line 77, in _run_agent
+    await self._run_agent_phase(
+  File "/root/agent-runtime-lab/.venv/lib/python3.12/site-packages/harbor/trial/trial.py", line 489, in _run_agent_phase
+    raise AgentTimeoutError(
+harbor.trial.errors.AgentTimeoutError: Agent execution timed out after 2700.0 seconds
