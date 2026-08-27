@@ -254,7 +254,15 @@ def manifest_text(spec: HarnessSpec) -> str:
         "tools": {"enabled": list(spec.tools.enabled)},
         "control": {"max_iterations": spec.control.max_iterations},
         "memory": {"strategy": spec.memory.strategy},
-        "recovery": {"tool_error": spec.recovery.tool_error},
+        "recovery": {
+            "tool_error": spec.recovery.tool_error,
+            "llm_errors": {
+                category: {"max_retries": policy.max_retries,
+                           "backoff": policy.backoff,
+                           "base_delay": policy.base_delay}
+                for category, policy in sorted(spec.recovery.llm_errors.items())
+            },
+        },
         "verification": {"enabled": spec.verification.enabled},
         "skills": list(spec.skills),
     }

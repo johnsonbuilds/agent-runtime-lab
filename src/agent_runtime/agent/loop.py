@@ -68,6 +68,39 @@ class _ReasoningBudgetExceeded(RuntimeError):
         self.budget = budget
 
 
+class _StreamIdleTimeout(RuntimeError):
+    """No chunk arrived within the idle timeout."""
+
+    llm_category = "stream_idle_timeout"
+
+
+class _StreamTruncated(RuntimeError):
+    """The server closed the stream without a finish_reason marker."""
+
+    llm_category = "stream_truncated"
+
+
+class _StreamEmpty(RuntimeError):
+    """A clean stream that carried no content, reasoning, or tool calls."""
+
+    llm_category = "stream_empty"
+
+
+def _llm_error_category(exc: BaseException) -> str | None:
+    """Map an LLM-call failure to its ``recovery.llm_errors`` category.
+
+    Returns ``None`` when the failure has dedicated handling elsewhere and
+    must never be retried here (the reasoning-budget nudge continues the
+    loop by itself); everything unrecognized counts as ``provider_error``.
+    """
+    category = getattr(exc, "llm_category", None)
+    if isinstance(category, str):
+        return category
+    if isinstance(exc, _ReasoningBudgetExceeded):
+        return None
+    return "provider_error"
+
+
 def use_streaming() -> bool:
     """Whether the runtime should consume LLM streaming (AGENT_RUNTIME_STREAM)."""
     value = os.getenv("AGENT_RUNTIME_STREAM", "1").lower()
@@ -425,7 +458,7 @@ class AgentTurn:
                                 message_count=len(compact_messages),
                                 tool_count=len(tools.schemas),
                                 messages=list(compact_messages)) as span_meta:
-                    response = await self._chat_response(
+                    response = await self._chat_with_recovery(
                         compact_messages, tools.schemas, iteration)
                     tool_calls = response.get("tool_calls") or []
                     content = response.get("content") or ""
@@ -547,7 +580,7 @@ class AgentTurn:
             with trace.span("llm", iteration,
                             message_count=len(compact_messages), tool_count=0,
                             messages=list(compact_messages)) as span_meta:
-                response = await self._chat_response(
+                response = await self._chat_with_recovery(
                     compact_messages, None, iteration)
                 span_meta.update(tool_count=0, tools=[], final=True)
                 logger.debug("llm.request.end iteration=%d content_chars=%d tool_calls=[]",
@@ -598,6 +631,40 @@ class AgentTurn:
             self.harness.tool_error_observation(rejection, tool=payload["tool"]))
         return _rejected_observation_message(tool_call, observation)
 
+    async def _chat_with_recovery(self, messages: list[dict[str, Any]],
+                                  tools: list[dict[str, Any]] | None,
+                                  iteration: int) -> dict[str, Any]:
+        """One chat request, retried per the ``recovery.llm_errors`` gene.
+
+        Retries replay the identical request in place; they do not consume
+        ``control.max_iterations``.  Attempt counts are kept per category so
+        one exhausted policy cannot eat another category's budget.
+        """
+        attempted: dict[str, int] = {}
+        while True:
+            try:
+                return await self._chat_response(messages, tools, iteration)
+            except Exception as exc:
+                category = _llm_error_category(exc)
+                if category is None:
+                    raise
+                policy = self.harness.recovery.llm_errors.get(category)
+                tried = attempted.get(category, 0)
+                if policy is None or tried >= policy.max_retries:
+                    raise
+                delay = policy.delay(tried + 1)
+                logger.warning(
+                    "llm.retry iteration=%d category=%s attempt=%d/%d "
+                    "delay=%.3fs error=%s", iteration, category,
+                    tried + 1, policy.max_retries, delay, exc)
+                self.trace.emit("llm.retry", iteration, category=category,
+                                attempt=tried + 1,
+                                max_retries=policy.max_retries,
+                                delay=round(delay, 3), error=str(exc))
+                attempted[category] = tried + 1
+                if delay > 0:
+                    await asyncio.sleep(delay)
+
     async def _chat_response(self, messages: list[dict[str, Any]],
                              tools: list[dict[str, Any]] | None,
                              iteration: int) -> dict[str, Any]:
@@ -642,7 +709,7 @@ class AgentTurn:
             except TimeoutError as exc:
                 logger.error("llm.stream.timeout iteration=%d timeout_seconds=%s",
                              iteration, timeout)
-                raise RuntimeError(
+                raise _StreamIdleTimeout(
                     f"LLM stream produced no chunk for {timeout:g} seconds"
                 ) from exc
             if not isinstance(chunk, Mapping):
@@ -693,11 +760,11 @@ class AgentTurn:
             # free-tier reasoning models after very long thinking).  Treat the
             # truncated stream as a failed turn so it can be retried instead
             # of silently becoming an empty final answer.
-            raise RuntimeError(
+            raise _StreamTruncated(
                 "LLM stream ended without a finish_reason "
                 "(stream may have been truncated by the server)")
         if not content and not reasoning and not tool_calls:
-            raise RuntimeError(
+            raise _StreamEmpty(
                 "LLM stream ended without any content, reasoning, or tool calls")
         return response
 

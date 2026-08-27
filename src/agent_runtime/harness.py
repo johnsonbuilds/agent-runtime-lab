@@ -45,6 +45,66 @@ TOOL_ERROR_STRATEGIES: dict[str, ToolErrorStrategy] = {
     "feed_error_and_continue": feed_error_and_continue,
 }
 
+# Categories a failed LLM call is classified into; each maps to its own
+# retry policy under the recovery.llm_errors gene.
+LLM_RETRY_CATEGORIES = (
+    "stream_idle_timeout",
+    "stream_truncated",
+    "stream_empty",
+    "provider_error",
+)
+
+
+def backoff_none(base_delay: float, attempt: int) -> float:
+    """Retry immediately, ignoring the base delay."""
+    return 0.0
+
+
+def backoff_fixed(base_delay: float, attempt: int) -> float:
+    """Same delay before every retry."""
+    return base_delay
+
+
+def backoff_exponential(base_delay: float, attempt: int) -> float:
+    """Double the delay with every subsequent retry."""
+    return base_delay * 2 ** (attempt - 1)
+
+
+BackoffPolicy = Callable[[float, int], float]
+
+BACKOFF_POLICIES: dict[str, BackoffPolicy] = {
+    "none": backoff_none,
+    "fixed": backoff_fixed,
+    "exponential": backoff_exponential,
+}
+
+
+@dataclass(frozen=True)
+class LLMRetryPolicy:
+    """Retry knobs for one LLM-error category.
+
+    ``max_retries`` counts retries on top of the initial attempt;
+    ``attempt`` in :meth:`delay` is 1-based (first retry = 1).
+    """
+
+    max_retries: int = 0
+    backoff: str = "exponential"
+    base_delay: float = 0.5
+
+    def delay(self, attempt: int) -> float:
+        try:
+            policy = BACKOFF_POLICIES[self.backoff]
+        except KeyError as missing:
+            raise HarnessError(
+                f"unknown backoff policy: {missing.args[0]!r}") from missing
+        return policy(self.base_delay, attempt)
+
+
+def _default_llm_errors() -> dict[str, LLMRetryPolicy]:
+    # Zero-retry everywhere so existing manifests keep their exact
+    # behavior; retries only happen when a harness opts in per category.
+    return {category: LLMRetryPolicy() for category in LLM_RETRY_CATEGORIES}
+
 MEMORY_STRATEGIES: tuple[str, ...] = (
     "full_history", "compact_observations", "llm_summary")
 
@@ -73,6 +133,8 @@ class MemoryGenome:
 @dataclass(frozen=True)
 class RecoveryGenome:
     tool_error: str = "feed_error_and_continue"
+    llm_errors: dict[str, LLMRetryPolicy] = field(
+        default_factory=_default_llm_errors)
 
 
 @dataclass(frozen=True)
@@ -230,14 +292,46 @@ def _recovery_genome(data: Mapping[str, Any]) -> RecoveryGenome:
     section = data.get("recovery") or {}
     if not isinstance(section, Mapping):
         raise HarnessError("recovery must be a mapping")
-    _check_keys(section, {"tool_error"}, "recovery")
+    _check_keys(section, {"tool_error", "llm_errors"}, "recovery")
     tool_error = _required_text(section, "tool_error", "recovery",
                                 "feed_error_and_continue")
     if tool_error not in TOOL_ERROR_STRATEGIES:
         raise HarnessError(
             f"recovery.tool_error must be one of "
             f"{sorted(TOOL_ERROR_STRATEGIES)}, got {tool_error!r}")
-    return RecoveryGenome(tool_error=tool_error)
+    llm_section = section.get("llm_errors") or {}
+    if not isinstance(llm_section, Mapping):
+        raise HarnessError("recovery.llm_errors must be a mapping")
+    _check_keys(llm_section, set(LLM_RETRY_CATEGORIES), "recovery.llm_errors")
+    llm_errors: dict[str, LLMRetryPolicy] = {}
+    for category in LLM_RETRY_CATEGORIES:
+        entry = llm_section.get(category) or {}
+        if not isinstance(entry, Mapping):
+            raise HarnessError(
+                f"recovery.llm_errors.{category} must be a mapping")
+        _check_keys(entry, {"max_retries", "backoff", "base_delay"},
+                    f"recovery.llm_errors.{category}")
+        max_retries = entry.get("max_retries", 0)
+        if (not isinstance(max_retries, int) or isinstance(max_retries, bool)
+                or max_retries < 0):
+            raise HarnessError(
+                f"recovery.llm_errors.{category}.max_retries must be an "
+                f"integer >= 0")
+        backoff = entry.get("backoff", "exponential")
+        if backoff not in BACKOFF_POLICIES:
+            raise HarnessError(
+                f"recovery.llm_errors.{category}.backoff must be one of "
+                f"{sorted(BACKOFF_POLICIES)}, got {backoff!r}")
+        base_delay = entry.get("base_delay", 0.5)
+        if (not isinstance(base_delay, (int, float))
+                or isinstance(base_delay, bool) or base_delay < 0):
+            raise HarnessError(
+                f"recovery.llm_errors.{category}.base_delay must be a "
+                f"non-negative number")
+        llm_errors[category] = LLMRetryPolicy(max_retries=max_retries,
+                                              backoff=backoff,
+                                              base_delay=float(base_delay))
+    return RecoveryGenome(tool_error=tool_error, llm_errors=llm_errors)
 
 
 def _verification_genome(data: Mapping[str, Any]) -> VerificationGenome:
@@ -452,6 +546,7 @@ __all__ = [
     "DEFAULT_HARNESS", "HarnessError", "HarnessSpec", "ITERATION_LIMIT_NOTICE",
     "PromptGenome", "ToolGenome", "ControlGenome", "MemoryGenome",
     "RecoveryGenome", "VerificationGenome", "TOOL_ERROR_STRATEGIES",
+    "LLM_RETRY_CATEGORIES", "LLMRetryPolicy", "BACKOFF_POLICIES",
     "MEMORY_STRATEGIES", "default_harness", "feed_error_and_continue",
     "from_dict", "load_harness", "resolve_harness", "_main",
 ]

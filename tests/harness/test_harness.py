@@ -14,6 +14,9 @@ from agent_runtime.harness import (
     ControlGenome,
     HarnessError,
     HarnessSpec,
+    LLM_RETRY_CATEGORIES,
+    LLMRetryPolicy,
+    RecoveryGenome,
     from_dict,
     load_harness,
     resolve_harness,
@@ -180,6 +183,98 @@ class TraceHarnessHeaderTests(unittest.TestCase):
 
             records = [json.loads(line) for line in path.read_text().splitlines()]
             self.assertEqual(records[0]["event_type"], "agent.start")
+
+
+class RecoveryLLMErrorsParsingTests(unittest.TestCase):
+    def test_default_materializes_all_categories_with_zero_retries(self) -> None:
+        spec = from_dict({})
+        self.assertEqual(set(spec.recovery.llm_errors),
+                         set(LLM_RETRY_CATEGORIES))
+        for policy in spec.recovery.llm_errors.values():
+            self.assertEqual(policy.max_retries, 0)
+
+    def test_partial_entry_fills_backoff_and_base_delay_defaults(self) -> None:
+        spec = from_dict({"recovery": {"llm_errors": {
+            "stream_truncated": {"max_retries": 2}}}})
+        policy = spec.recovery.llm_errors["stream_truncated"]
+        self.assertEqual((policy.max_retries, policy.backoff, policy.base_delay),
+                         (2, "exponential", 0.5))
+        untouched = [p.max_retries for category, p
+                     in spec.recovery.llm_errors.items()
+                     if category != "stream_truncated"]
+        self.assertEqual(untouched, [0, 0, 0])
+
+    def test_explicit_entry_roundtrips_all_fields(self) -> None:
+        spec = from_dict({"recovery": {"tool_error": "feed_error_and_continue",
+                                       "llm_errors": {
+                                           "provider_error": {
+                                               "max_retries": 3,
+                                               "backoff": "fixed",
+                                               "base_delay": 1.5}}}})
+        policy = spec.recovery.llm_errors["provider_error"]
+        self.assertEqual((policy.max_retries, policy.backoff, policy.base_delay),
+                         (3, "fixed", 1.5))
+
+    def test_null_category_entry_falls_back_to_zero_retries(self) -> None:
+        spec = from_dict({"recovery": {"llm_errors": {"stream_empty": None}}})
+        self.assertEqual(spec.recovery.llm_errors["stream_empty"].max_retries, 0)
+
+    def test_unknown_llm_error_category_is_rejected(self) -> None:
+        with self.assertRaisesRegex(HarnessError, "unknown recovery.llm_errors"):
+            from_dict({"recovery": {"llm_errors": {
+                "network_flap": {"max_retries": 1}}}})
+
+    def test_unknown_entry_key_is_rejected(self) -> None:
+        with self.assertRaisesRegex(
+                HarnessError,
+                "unknown recovery.llm_errors.stream_truncated keys"):
+            from_dict({"recovery": {"llm_errors": {
+                "stream_truncated": {"max_retries": 1, "jitter": True}}}})
+
+    def test_negative_max_retries_is_rejected(self) -> None:
+        with self.assertRaisesRegex(HarnessError,
+                                    "max_retries must be an integer >= 0"):
+            from_dict({"recovery": {"llm_errors": {
+                "stream_truncated": {"max_retries": -1}}}})
+
+    def test_unknown_backoff_is_rejected(self) -> None:
+        with self.assertRaisesRegex(HarnessError,
+                                    "backoff must be one of"):
+            from_dict({"recovery": {"llm_errors": {
+                "stream_truncated": {"max_retries": 1,
+                                     "backoff": "fibonacci"}}}})
+
+    def test_bad_base_delay_is_rejected(self) -> None:
+        with self.assertRaisesRegex(HarnessError,
+                                    "base_delay must be a non-negative number"):
+            from_dict({"recovery": {"llm_errors": {
+                "stream_truncated": {"base_delay": "soon"}}}})
+
+
+class LLMRetryPolicyDelayTests(unittest.TestCase):
+    def test_fixed_backoff_keeps_delay_constant(self) -> None:
+        policy = LLMRetryPolicy(max_retries=3, backoff="fixed", base_delay=0.25)
+        self.assertEqual([policy.delay(attempt) for attempt in (1, 2, 3)],
+                         [0.25, 0.25, 0.25])
+
+    def test_exponential_backoff_doubles_each_attempt(self) -> None:
+        policy = LLMRetryPolicy(max_retries=3, backoff="exponential",
+                                base_delay=0.5)
+        self.assertEqual([policy.delay(attempt) for attempt in (1, 2, 3)],
+                         [0.5, 1.0, 2.0])
+
+    def test_none_backoff_ignores_base_delay(self) -> None:
+        policy = LLMRetryPolicy(max_retries=1, backoff="none", base_delay=9.9)
+        self.assertEqual(policy.delay(1), 0.0)
+
+    def test_retry_gene_change_is_visible_in_genes_hash(self) -> None:
+        parent = HarnessSpec()
+        child = HarnessSpec(recovery=RecoveryGenome(
+            tool_error=parent.recovery.tool_error,
+            llm_errors={**parent.recovery.llm_errors,
+                        "stream_truncated": LLMRetryPolicy(
+                            max_retries=2, backoff="fixed", base_delay=0.25)}))
+        self.assertNotEqual(parent.genes_hash, child.genes_hash)
 
 
 if __name__ == "__main__":

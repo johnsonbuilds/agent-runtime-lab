@@ -5,12 +5,21 @@ import unittest
 from os import environ
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
+import agent_runtime.agent.loop as loop_module
 from agent_runtime.agent.loop import AgentTurn, Conversation, run_turn, use_streaming
-from agent_runtime.harness import HarnessSpec, PromptGenome, ControlGenome
+from agent_runtime.harness import (
+    ControlGenome,
+    HarnessSpec,
+    LLM_RETRY_CATEGORIES,
+    LLMRetryPolicy,
+    PromptGenome,
+    RecoveryGenome,
+)
 from agent_runtime.trace import RunTrace
 from agent_runtime.tools.tools import ToolRegistry, ToolSpec
 
@@ -520,6 +529,178 @@ class HarnessIntegrationTests(unittest.IsolatedAsyncioTestCase):
         observation = llm.messages[1][-1]["content"]
         self.assertEqual(observation,
                          "Tool error: service unavailable")
+
+
+class RetryableStreamLLM:
+    """Streaming fake whose attempts either raise or yield scripted chunks."""
+
+    def __init__(self, attempts: list[Any]) -> None:
+        self.attempts = list(attempts)
+        self.calls = 0
+
+    async def chat(self, messages: list[dict[str, Any]],
+                   tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        raise AssertionError("the runtime should use stream()")
+
+    async def stream(self, messages: list[dict[str, Any]],
+                     tools: list[dict[str, Any]] | None = None):
+        self.calls += 1
+        outcome = self.attempts.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        for chunk in outcome:
+            yield chunk
+
+
+class FlakyChatLLM(FakeLLM):
+    """Non-streaming fake that raises once, then serves its responses."""
+
+    def __init__(self, responses: list[dict[str, Any]] | None = None,
+                 error: Exception | None = None) -> None:
+        super().__init__(responses, error)
+        self.calls = 0
+
+    async def chat(self, messages: list[dict[str, Any]],
+                   tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        self.calls += 1
+        if self.error is not None:
+            error, self.error = self.error, None
+            raise error
+        return await super().chat(messages, tools)
+
+
+def make_retry_harness(**policies: LLMRetryPolicy) -> HarnessSpec:
+    entries = {category: LLMRetryPolicy() for category in LLM_RETRY_CATEGORIES}
+    entries.update(policies)
+    return HarnessSpec(recovery=RecoveryGenome(llm_errors=entries))
+
+
+class LLMRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    ANSWER = [{"content": "It is sunny", "tool_calls": []},
+              {"finish_reason": "stop"}]
+
+    async def test_truncated_stream_is_retried_and_recovers(self) -> None:
+        llm = RetryableStreamLLM([[{"content": "partial"}], list(self.ANSWER)])
+        harness = make_retry_harness(stream_truncated=LLMRetryPolicy(
+            max_retries=1, backoff="none", base_delay=0.5))
+        trace = RunTrace(run_id="retry-truncated")
+
+        answer = await run_turn("weather", llm, make_registry(), stream=True,
+                                harness=harness, trace=trace)
+
+        self.assertEqual(answer, "It is sunny")
+        self.assertEqual(llm.calls, 2)
+        retries = [event for event in trace.events
+                   if event.event_type == "llm.retry"]
+        self.assertEqual(len(retries), 1)
+        self.assertEqual(retries[0].data["category"], "stream_truncated")
+        self.assertEqual(retries[0].data["attempt"], 1)
+        self.assertEqual(retries[0].data["max_retries"], 1)
+
+    async def test_empty_stream_is_retried_once(self) -> None:
+        llm = RetryableStreamLLM([[{"finish_reason": "stop"}],
+                                  list(self.ANSWER)])
+        harness = make_retry_harness(stream_empty=LLMRetryPolicy(
+            max_retries=1, backoff="none"))
+
+        answer = await run_turn("weather", llm, make_registry(), stream=True,
+                                harness=harness)
+
+        self.assertEqual(answer, "It is sunny")
+        self.assertEqual(llm.calls, 2)
+
+    async def test_idle_timeout_is_classified_and_retried(self) -> None:
+        llm = RetryableStreamLLM([TimeoutError(), list(self.ANSWER)])
+        harness = make_retry_harness(stream_idle_timeout=LLMRetryPolicy(
+            max_retries=1, backoff="none"))
+
+        answer = await run_turn("weather", llm, make_registry(), stream=True,
+                                harness=harness)
+
+        self.assertEqual(answer, "It is sunny")
+        self.assertEqual(llm.calls, 2)
+
+    async def test_exhausted_retries_fail_the_turn(self) -> None:
+        partial = [{"content": "partial"}]
+        llm = RetryableStreamLLM([partial, partial])
+        harness = make_retry_harness(stream_truncated=LLMRetryPolicy(
+            max_retries=1, backoff="none"))
+
+        answer = await run_turn("weather", llm, make_registry(), stream=True,
+                                harness=harness)
+
+        self.assertTrue(answer.startswith("LLM error:"))
+        self.assertIn("finish_reason", answer)
+        self.assertEqual(llm.calls, 2)
+
+    async def test_default_harness_never_retries_llm_errors(self) -> None:
+        llm = RetryableStreamLLM([[{"content": "partial"}],
+                                  list(self.ANSWER)])
+
+        answer = await run_turn("weather", llm, make_registry(), stream=True,
+                                harness=HarnessSpec())
+
+        self.assertTrue(answer.startswith("LLM error:"))
+        self.assertEqual(llm.calls, 1)
+
+    async def test_policies_apply_only_to_their_own_category(self) -> None:
+        llm = RetryableStreamLLM([[{"content": "partial"}],
+                                  list(self.ANSWER)])
+        harness = make_retry_harness(stream_empty=LLMRetryPolicy(
+            max_retries=3, backoff="none"))
+
+        answer = await run_turn("weather", llm, make_registry(), stream=True,
+                                harness=harness)
+
+        self.assertTrue(answer.startswith("LLM error:"))
+        self.assertEqual(llm.calls, 1)
+
+    async def test_provider_error_is_retried_on_non_streaming_path(self) -> None:
+        llm = FlakyChatLLM([{"content": "It is sunny", "tool_calls": []}],
+                           error=ValueError("provider hiccup"))
+        harness = make_retry_harness(provider_error=LLMRetryPolicy(
+            max_retries=1, backoff="none"))
+
+        answer = await run_turn("weather", llm, make_registry(),
+                                harness=harness)
+
+        self.assertEqual(answer, "It is sunny")
+        self.assertEqual(llm.calls, 2)
+
+    async def test_fixed_backoff_sleeps_with_computed_delay(self) -> None:
+        llm = RetryableStreamLLM([[{"content": "partial"}],
+                                  list(self.ANSWER)])
+        harness = make_retry_harness(stream_truncated=LLMRetryPolicy(
+            max_retries=1, backoff="fixed", base_delay=0.25))
+
+        with mock.patch.object(loop_module.asyncio, "sleep",
+                               new=mock.AsyncMock()) as fake_sleep:
+            answer = await run_turn("weather", llm, make_registry(),
+                                    stream=True, harness=harness)
+
+        self.assertEqual(answer, "It is sunny")
+        fake_sleep.assert_awaited_once_with(0.25)
+
+    async def test_reasoning_budget_bypasses_retry_and_nudges_instead(self) -> None:
+        previous = environ.get("AGENT_RUNTIME_MAX_REASONING_CHARS")
+        environ["AGENT_RUNTIME_MAX_REASONING_CHARS"] = "10"
+        try:
+            llm = RetryableStreamLLM([[{"reasoning_content": "y" * 40}],
+                                      list(self.ANSWER)])
+            # A generous provider_error budget proves the guard never reaches it.
+            harness = make_retry_harness(provider_error=LLMRetryPolicy(
+                max_retries=5, backoff="none"))
+
+            answer = await run_turn("weather", llm, make_registry(),
+                                    stream=True, harness=harness)
+        finally:
+            if previous is None:
+                environ.pop("AGENT_RUNTIME_MAX_REASONING_CHARS", None)
+            else:
+                environ["AGENT_RUNTIME_MAX_REASONING_CHARS"] = previous
+
+        self.assertEqual(answer, "It is sunny")
+        self.assertEqual(llm.calls, 2)
 
 
 class StreamingConfigTests(unittest.TestCase):

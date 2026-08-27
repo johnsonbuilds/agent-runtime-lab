@@ -204,6 +204,26 @@ class DeriveTests(unittest.TestCase):
         self.assertEqual(child.tools.enabled, ("run_command", "read_file"))
         self.assertEqual(child.prompt.system, "You are a shell agent.")
 
+    def test_derive_mutates_nested_llm_retry_policy(self) -> None:
+        parent = from_dict({})
+        child, diff = derive(parent, "retry-v1", "retry truncated streams",
+                             None,
+                             [("recovery.llm_errors.stream_truncated.max_retries",
+                               "2")])
+        policy = child.recovery.llm_errors["stream_truncated"]
+        self.assertEqual(policy.max_retries, 2)
+        self.assertEqual(policy.backoff, "exponential")
+        self.assertIn(
+            "recovery.llm_errors.stream_truncated.max_retries: 0 -> 2", diff)
+
+    def test_manifest_text_roundtrips_llm_retry_policies(self) -> None:
+        spec = from_dict({"recovery": {"llm_errors": {
+            "stream_empty": {"max_retries": 1, "backoff": "none"},
+            "stream_truncated": {"max_retries": 2, "base_delay": 0.25}}}})
+        rebuilt = from_dict(yaml.safe_load(manifest_text(spec)))
+        self.assertEqual(spec.recovery.tool_error, rebuilt.recovery.tool_error)
+        self.assertEqual(spec.recovery.llm_errors, rebuilt.recovery.llm_errors)
+
     def test_derive_unknown_path_is_rejected(self) -> None:
         parent = from_dict({})
         with self.assertRaisesRegex(HarnessError, "unknown gene path"):
