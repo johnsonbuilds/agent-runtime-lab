@@ -193,11 +193,23 @@ class ApplyMemoryStrategyTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FakeSummaryLLM:
-    def __init__(self, summary: str = "OBJECTIVE: summarized",
+    def __init__(self, summary: str | None = None,
                  *, error: Exception | None = None) -> None:
-        self.summary = summary
         self.error = error
         self.call_count = 0
+        if summary is not None:
+            self.summary = summary
+        else:
+            self.summary = (
+                "# Agent Context Snapshot\n\n"
+                "## 1. Work State\n"
+                "### Completed\n"
+                "- nothing yet\n\n"
+                "## 2. Next Move\n"
+                "- keep going\n\n"
+                "## 3. Working Context & Anchors\n"
+                "- **Relevant Files**: none"
+            )
 
     async def chat(self, messages: list[dict[str, Any]],
                    tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -221,7 +233,15 @@ class SummarizeHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_collapses_old_rounds_keeps_tail_and_task(self) -> None:
         messages = build_rounds(10, 5_000)
-        llm = FakeSummaryLLM(summary="WORK STATE: mid-flight")
+        llm = FakeSummaryLLM(summary=(
+            "# Agent Context Snapshot\n\n"
+            "## 1. Work State\n"
+            "### Completed\n"
+            "- WORK STATE: mid-flight\n\n"
+            "## 2. Next Move\n"
+            "- continue\n\n"
+            "## 3. Working Context & Anchors\n"
+            "- **Files**: ars.R"))
         set_summary_llm(llm)
         result = await summarize_history(messages, budget=1_000, tail_rounds=2)
 
@@ -251,12 +271,36 @@ class SummarizeHistoryTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "session_memory.md"
             messages = build_rounds(10, 5_000)
-            set_summary_llm(FakeSummaryLLM(summary="LATEST SNAPSHOT"))
+            set_summary_llm(FakeSummaryLLM(summary=(
+                "# Agent Context Snapshot\n\n"
+                "## 1. Work State\n"
+                "### Completed\n"
+                "- LATEST SNAPSHOT\n\n"
+                "## 2. Next Move\n"
+                "- continue\n\n"
+                "## 3. Working Context & Anchors\n"
+                "- **Files**: ars.R")))
             await summarize_history(messages, budget=1_000,
                                     tail_rounds=2,
                                     session_memory_path=path)
             self.assertTrue(path.is_file())
-            self.assertIn("LATEST SNAPSHOT", path.read_text(encoding="utf-8"))
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("LATEST SNAPSHOT", content)
+            self.assertIn("## 1. Work State", content)
+
+    async def test_invalid_summary_falls_back_to_compact(self) -> None:
+        messages = build_rounds(10, 5_000)
+        # Missing "## 3. Working Context & Anchors" → invalid → fallback
+        llm = FakeSummaryLLM(summary=(
+            "# Agent Context Snapshot\n\n"
+            "## 1. Work State\n"
+            "### Completed\n"
+            "- done\n\n"
+            "## 2. Next Move\n"
+            "- continue"))
+        set_summary_llm(llm)
+        result = await summarize_history(messages, budget=1_000, tail_rounds=2)
+        self.assertIn("observation compacted", result[3]["content"])
 
 
 class ApplyMemoryStrategyLLMRoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -265,7 +309,7 @@ class ApplyMemoryStrategyLLMRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_llm_summary_routes_to_summarizer(self) -> None:
         messages = build_rounds(10, 5_000)
-        set_summary_llm(FakeSummaryLLM(summary="x"))
+        set_summary_llm(FakeSummaryLLM())
         result = await apply_memory_strategy(
             messages, "llm_summary", budget=1_000, tail_rounds=2)
         self.assertEqual(sum(1 for m in result if m["role"] == "tool"), 2)

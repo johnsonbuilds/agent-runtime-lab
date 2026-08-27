@@ -334,12 +334,30 @@ async def _generate_summary(messages: list[dict[str, Any]], llm: Any,
     return response.get("content") or ""
 
 
+_REQUIRED_SECTIONS = ["## 1. Work State", "## 2. Next Move", "## 3. Working Context & Anchors"]
+
+
+def _validate_summary(summary: str) -> None:
+    """Raise ``ValueError`` when ``summary`` does not look like a valid
+    structured summary produced by the summarizer.
+
+    A valid summary must be non-empty and contain all three required
+    section headers.
+    """
+    stripped = summary.strip()
+    if not stripped:
+        raise ValueError("summary is empty")
+    for section in _REQUIRED_SECTIONS:
+        if section not in stripped:
+            raise ValueError(f"summary missing required section {section!r}")
+
+
 async def summarize_history(messages: list[dict[str, Any]], *,
-                           budget: int | None = None,
-                           tail_rounds: int | None = None,
-                           prompt: str | None = None,
-                           session_memory_path: Path | None = None
-                           ) -> list[dict[str, Any]]:
+                            budget: int | None = None,
+                            tail_rounds: int | None = None,
+                            prompt: str | None = None,
+                            session_memory_path: Path | None = None
+                            ) -> list[dict[str, Any]]:
     """Return a summarized copy of ``messages`` once over ``budget``.
 
     The summarizer reads the FULL history and produces a structured summary
@@ -350,9 +368,9 @@ async def summarize_history(messages: list[dict[str, Any]], *,
     ``session_memory.md`` (overwriting any prior summary for this task).
 
     Below budget, or when there are no older rounds to collapse, the original
-    list is returned unchanged. If the summarizer LLM call fails, the strategy
-    falls back to the deterministic ``compact_observations`` so the turn still
-    proceeds.
+    list is returned unchanged. If the summarizer LLM call fails *or* produces
+    an invalid summary (missing sections), the strategy falls back to the
+    deterministic ``compact_observations`` so the turn still proceeds.
     """
     if budget is None:
         budget = _context_budget()
@@ -370,6 +388,11 @@ async def summarize_history(messages: list[dict[str, Any]], *,
         summary = await _generate_summary(messages, llm, prompt)
     except Exception:
         logger.warning("memory.summary.failed falling back to compact_observations")
+        return compact_observations(messages, budget=budget)
+    try:
+        _validate_summary(summary)
+    except ValueError as exc:
+        logger.warning("memory.summary.invalid %s falling back to compact_observations", exc)
         return compact_observations(messages, budget=budget)
     leading = messages[:starts[0]]
     tail_start = starts[-tail_rounds]
