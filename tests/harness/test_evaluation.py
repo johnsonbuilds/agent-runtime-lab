@@ -43,13 +43,13 @@ def make_job(root: Path, name: str, *, passed: bool, harness_id: str = "baseline
         "exception_info": {"type": "RuntimeError", "message": "boom"} if error else None,
         "agent_execution": {"started_at": "2026-08-18T10:00:00Z",
                             "finished_at": "2026-08-18T10:01:00Z"},
-        "agent_info": {"name": "agent-runtime-lab", "model_info": None},
+        "agent_info": {"name": "sunagent", "model_info": None},
     }
     (trial_dir / "result.json").write_text(json.dumps(trial_result))
 
     reward = 1.0 if passed else 0.0
     top_result = {
-        "stats": {"evals": {"agent-runtime-lab__terminal-bench/terminal-bench-2": {
+        "stats": {"evals": {"sunagent__terminal-bench/terminal-bench-2": {
             "n_trials": 1, "n_errors": 1 if error else 0,
             "reward_stats": {"reward": {str(reward): ["fix-git__TRIAL01"]}}
                               if not error else {},

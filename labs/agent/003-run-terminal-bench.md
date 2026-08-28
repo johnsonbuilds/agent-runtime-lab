@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This lab runs the existing `agent-runtime-lab` Agent Loop inside a Harbor
+This lab runs the existing `sunagent` Agent Loop inside a Harbor
 Terminal-Bench trial.
 
 The execution path is:

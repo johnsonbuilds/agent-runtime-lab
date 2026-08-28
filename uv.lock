@@ -3,43 +3,6 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
-name = "agent-runtime-lab"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "openai" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "tree-sitter" },
-    { name = "tree-sitter-python" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-eval = [
-    { name = "harbor" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "openai", specifier = ">=1.0.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "tree-sitter", specifier = ">=0.26.0" },
-    { name = "tree-sitter-python", specifier = ">=0.25.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
-]
-eval = [{ name = "harbor", specifier = ">=0.21.0" }]
-
-[[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1893,6 +1856,43 @@ sdist = { url = "https://files.pythonhosted.org/packages/85/ad/430fb60d90e1d112a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/69/297302c5f5f59c862faa31e6cb9a4cd74721cd1e052b38e464c5b402df8b/StrEnum-0.4.15-py3-none-any.whl", hash = "sha256:a30cda4af7cc6b5bf52c8055bc4bf4b2b6b14a93b574626da33df53cf7740659", size = 8851, upload-time = "2023-06-29T22:02:56.947Z" },
 ]
+
+[[package]]
+name = "sunagent"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "openai" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-python" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+eval = [
+    { name = "harbor" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "openai", specifier = ">=1.0.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "tree-sitter", specifier = ">=0.26.0" },
+    { name = "tree-sitter-python", specifier = ">=0.25.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+]
+eval = [{ name = "harbor", specifier = ">=0.21.0" }]
 
 [[package]]
 name = "supabase"

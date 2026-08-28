@@ -1,5 +1,5 @@
 [project]
-name = "agent-runtime-lab"
+name = "sunagent"
 version = "0.1.0"
 description = "Small, composable exercises for learning agent systems"
 readme = "README.md"

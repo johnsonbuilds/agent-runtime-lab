@@ -1,4 +1,4 @@
-"""Harbor BaseAgent adapter for agent-runtime-lab."""
+"""Harbor BaseAgent adapter for SunAgent."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class HarborAgent(BaseAgent):
 
     @staticmethod
     def name() -> str:
-        return "agent-runtime-lab"
+        return "sunagent"
 
     def version(self) -> str:
         return "0.1.0"

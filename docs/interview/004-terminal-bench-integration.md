@@ -81,7 +81,7 @@ The architecture is:
           ↓
       HarborAgent
           ↓
-    agent-runtime-lab
+    sunagent
           ↓
        Agent Loop
           ↓
