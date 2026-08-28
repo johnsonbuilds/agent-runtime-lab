@@ -2,7 +2,7 @@
 
 ``messages`` is the single source of truth shared across turns; ``view``
 is the (possibly compacted) projection actually sent to the model and
-watched by the budget gate.  The two are appended in lockstep through a
+watched by the budget gate. The two are appended in lockstep through a
 single entry point, so the invariant that used to rest on discipline at
 every append site — update one list, never forget the other — is now
 enforced by construction.
@@ -15,13 +15,32 @@ from typing import Any
 from agent_runtime.agent.memory import apply_memory_strategy
 
 
+class Conversation:
+    """Conversation state shared by multiple agent turns."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    def append(self, message: dict[str, Any]) -> None:
+        self.messages.append(message)
+
+
+def _ensure_system_prompt(conversation: Conversation, system: str) -> None:
+    """Insert the harness system prompt once, before the first user message."""
+    if not system:
+        return
+    if any(message.get("role") == "system" for message in conversation.messages):
+        return
+    conversation.messages.insert(0, {"role": "system", "content": system})
+
+
 class TurnHistory:
     """Conversation history and its request view, appended in lockstep.
 
     ``view`` starts as an independent copy of the initialized
-    conversation so the two never alias.  ``refresh_view`` may replace
+    conversation so the two never alias. ``refresh_view`` may replace
     the view wholesale when a memory strategy produces a compacted copy;
-    subsequent appends still land in both.  When the strategy returns
+    subsequent appends still land in both. When the strategy returns
     ``messages`` itself (``full_history``), the view keeps its own
     identity — it must never alias the full list, or mirrored appends
     would double up.
@@ -44,3 +63,6 @@ class TurnHistory:
             trace=trace, iteration=iteration)
         if new_view is not self.messages:
             self.view = new_view
+
+
+__all__ = ["Conversation", "TurnHistory"]

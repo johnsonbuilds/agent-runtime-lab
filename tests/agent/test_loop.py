@@ -10,6 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
+import agent_runtime.agent.chat as chat_module
 import agent_runtime.agent.loop as loop_module
 from agent_runtime.agent.loop import AgentTurn, Conversation, run_turn, use_streaming
 from agent_runtime.harness import (
@@ -673,7 +674,7 @@ class LLMRecoveryTests(unittest.IsolatedAsyncioTestCase):
         harness = make_retry_harness(stream_truncated=LLMRetryPolicy(
             max_retries=1, backoff="fixed", base_delay=0.25))
 
-        with mock.patch.object(loop_module.asyncio, "sleep",
+        with mock.patch.object(chat_module.asyncio, "sleep",
                                new=mock.AsyncMock()) as fake_sleep:
             answer = await run_turn("weather", llm, make_registry(),
                                     stream=True, harness=harness)
