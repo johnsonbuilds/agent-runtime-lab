@@ -3,7 +3,7 @@
   "created_at": "2026-08-30T13:04:54",
   "harness_id": "meta-v10",
   "genes_hash": "6af0a813a68e937e",
-  "model": null,
+  "model": "Ling-3.0-flash",
   "benchmark": "terminal-bench/terminal-bench-2",
   "job_dir": "jobs/2026-08-30__09-16-19",
   "git_commit": "693fe0d",
@@ -26,5 +26,5 @@
       "failure_mode": null
     }
   ],
-  "notes": null
+  "notes": "verify affect for improve observation"
 }
