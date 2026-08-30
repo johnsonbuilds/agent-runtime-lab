@@ -43,7 +43,6 @@ LANGUAGES = {name: spec["extension"] for name, spec in LANGUAGE_SPECS.items()}
 SCRIPTS_DIR = ".scripts"
 OUTPUTS_DIR = ".outputs"
 DEFAULT_TIMEOUT = 120.0
-DEFAULT_MAX_OUTPUT_CHARS = 16_000
 
 _SEQUENCE = re.compile(r"^(\d{4})\.")
 
@@ -157,6 +156,6 @@ async def execute_code(code: str, language: str = "python",
 
 
 __all__ = [
-    "DEFAULT_MAX_OUTPUT_CHARS", "DEFAULT_TIMEOUT", "LANGUAGES", "LANGUAGE_SPECS",
+    "DEFAULT_TIMEOUT", "LANGUAGES", "LANGUAGE_SPECS",
     "OUTPUTS_DIR", "SCRIPTS_DIR", "execute_code",
 ]

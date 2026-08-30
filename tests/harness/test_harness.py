@@ -56,6 +56,59 @@ class HarnessDefaultTests(unittest.TestCase):
         self.assertEqual(spec.control, replica.control)
 
 
+class TranscriptEconomicsGenesTests(unittest.TestCase):
+    """The observation/memory sizing knobs live on the genome."""
+
+    def test_genome_defaults_match_runtime_invariants(self) -> None:
+        self.assertEqual(DEFAULT_HARNESS.memory.head_chars, 200)
+        self.assertEqual(DEFAULT_HARNESS.memory.context_budget, 60_000)
+        self.assertEqual(DEFAULT_HARNESS.memory.window_rounds, 12)
+        self.assertEqual(DEFAULT_HARNESS.memory.keep_recent_rounds, 2)
+        self.assertEqual(DEFAULT_HARNESS.memory.summary_tail_rounds, 2)
+        self.assertEqual(DEFAULT_HARNESS.control.max_observation_chars, 16_000)
+        self.assertEqual(DEFAULT_HARNESS.control.spill_preview_chars, 4_000)
+
+    def test_yaml_parses_new_gene_keys(self) -> None:
+        spec = from_dict({
+            "control": {"max_iterations": 30,
+                        "max_observation_chars": 8_000,
+                        "spill_preview_chars": 2_000},
+            "memory": {"strategy": "compact_observations",
+                       "head_chars": 500,
+                       "context_budget": 30_000,
+                       "window_rounds": 6,
+                       "keep_recent_rounds": 3,
+                       "summary_tail_rounds": 4},
+        })
+        self.assertEqual(spec.control.max_observation_chars, 8_000)
+        self.assertEqual(spec.control.spill_preview_chars, 2_000)
+        self.assertEqual(spec.memory.head_chars, 500)
+        self.assertEqual(spec.memory.context_budget, 30_000)
+        self.assertEqual(spec.memory.window_rounds, 6)
+        self.assertEqual(spec.memory.keep_recent_rounds, 3)
+        self.assertEqual(spec.memory.summary_tail_rounds, 4)
+
+    def test_bad_transcript_economics_values_are_rejected(self) -> None:
+        for section, key in (("control", "max_observation_chars"),
+                             ("control", "spill_preview_chars"),
+                             ("memory", "head_chars"),
+                             ("memory", "context_budget"),
+                             ("memory", "window_rounds"),
+                             ("memory", "keep_recent_rounds"),
+                             ("memory", "summary_tail_rounds")):
+            with self.subTest(section=section, key=key):
+                with self.assertRaisesRegex(HarnessError, f"{section}.{key}"):
+                    from_dict({section: {key: 0}})
+                with self.assertRaisesRegex(HarnessError, f"{section}.{key}"):
+                    from_dict({section: {key: "big"}})
+
+    def test_unknown_transcript_economics_keys_are_rejected(self) -> None:
+        with self.assertRaisesRegex(HarnessError, "control"):
+            from_dict({"control": {"max_observation_x": 1}})
+        with self.assertRaisesRegex(HarnessError, "memory"):
+            from_dict({"memory": {"head_x": 1}})
+
+
 class HarnessValidationTests(unittest.TestCase):
     def assert_harness_error(self, yaml_text: str, fragment: str) -> None:
         with tempfile.TemporaryDirectory() as directory:

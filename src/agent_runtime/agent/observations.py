@@ -21,7 +21,6 @@ tool* that dereferences archived files lives in the tools layer.
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -29,11 +28,16 @@ from typing import Any
 
 from agent_runtime.execution.base import Workspace
 from agent_runtime.execution.local import LocalWorkspace
-from agent_runtime.tools.code import DEFAULT_MAX_OUTPUT_CHARS, OUTPUTS_DIR
-from .memory import DEFAULT_HEAD_CHARS
+from agent_runtime.harness import (
+    DEFAULT_HEAD_CHARS,
+    DEFAULT_MAX_OBSERVATION_CHARS,
+    DEFAULT_SPILL_PREVIEW_CHARS,
+)
+from agent_runtime.tools.code import OUTPUTS_DIR
 
-SPILL_PREVIEW_CHARS = 4_000
 _UNSAFE_CHARS = re.compile(r"[^\w.-]")
+
+
 @dataclass(frozen=True)
 class RenderedObservation:
     """The transcript text for one tool result plus its archive reference.
@@ -45,15 +49,6 @@ class RenderedObservation:
 
     text: str
     spill_path: str | None = None
-
-
-def _max_chars() -> int:
-    raw = os.getenv("AGENT_RUNTIME_MAX_OUTPUT_CHARS")
-    try:
-        value = int(raw) if raw else DEFAULT_MAX_OUTPUT_CHARS
-    except ValueError:
-        return DEFAULT_MAX_OUTPUT_CHARS
-    return value if value > 0 else DEFAULT_MAX_OUTPUT_CHARS
 
 
 def _spill_name(call_id: str) -> str | None:
@@ -137,18 +132,26 @@ class ObservationFormatter:
     ever be lost.
 
     ``memory`` compaction truncates observation text beyond
-    ``DEFAULT_HEAD_CHARS`` — anything at or below that size can never
-    lose data and skips the archive (a ``printf hello`` observation does
-    not need a file, and in remote environments each write is a container
+    ``head_chars`` — anything at or below that size can never lose data
+    and skips the archive (a ``printf hello`` observation does not need a
+    file, and in remote environments each write is a container
     round-trip).  Everything above it is archived at birth, so compaction
     later shortens text without any I/O and the model can always page the
     original back with ``read_output``.
+
+    The knobs are injected from the harness genome: ``max_chars`` /
+    ``spill_preview_chars`` come from ``control``, ``archive_min_chars``
+    is derived from ``memory.head_chars`` so the invariant is structural.
     """
 
     def __init__(self, workspace: Workspace | None = None,
                  max_chars: int | None = None,
+                 spill_preview_chars: int | None = None,
                  archive_min_chars: int | None = None) -> None:
-        self.max_chars = max_chars if max_chars is not None else _max_chars()
+        self.max_chars = (max_chars if max_chars is not None
+                          else DEFAULT_MAX_OBSERVATION_CHARS)
+        self.spill_preview_chars = (spill_preview_chars if spill_preview_chars is not None
+                                    else DEFAULT_SPILL_PREVIEW_CHARS)
         self.archive_min_chars = (archive_min_chars if archive_min_chars is not None
                                   else DEFAULT_HEAD_CHARS)
         self.spill = OutputSpill(workspace)
@@ -164,13 +167,13 @@ class ObservationFormatter:
             return RenderedObservation(text, spill_path)
         return RenderedObservation(self._window(text, spill_path), spill_path)
 
-    @staticmethod
-    def _window(text: str, spill_path: str | None) -> str:
+    def _window(self, text: str, spill_path: str | None) -> str:
         """Head/tail window with an honest marker.  When there is no real
         middle to omit (or no archive), the text passes through verbatim —
         the observation must never grow, and without an archive no data
         is destroyed either."""
-        head, tail = text[:SPILL_PREVIEW_CHARS], text[-SPILL_PREVIEW_CHARS:]
+        head, tail = (text[:self.spill_preview_chars],
+                      text[-self.spill_preview_chars:])
         omitted = len(text) - len(head) - len(tail)
         if omitted <= 0:
             return text

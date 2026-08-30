@@ -1,0 +1,105 @@
+# Harness genome: describes HOW this agent works, as versioned data.
+# The runtime engine stays stable; mutating this file (one gene at a
+# time, with id/parent/mutation/reason recorded) is how harnesses evolve.
+
+id: meta-v12
+parent: meta-v11
+mutation: declare transcript-economics genes explicitly (memory + control sizing knobs)
+reason: >
+  No behavior change vs meta-v11: every value below equals the runtime
+  default. The point is to make the transcript-economics knobs visible and
+  mutable in the genome so follow-up experiments are one-key edits: e.g.
+  max_observation_chars 16000 -> 8000 (does a tighter inline budget cut
+  tokens without hurting task success?), or context_budget/head_chars for
+  compaction aggressiveness. Observation archiving (spill-at-birth) follows
+  memory.head_chars automatically, so tuning head_chars keeps the invariant
+  "archive exactly what compaction could truncate" without code changes.
+prompt:
+  system: 'You are an autonomous agent capable of solving complex tasks through step-by-step
+    reasoning and tool usage. Follow these non-negotiable global rules:
+
+    1. EXECUTION MINDSET: Break complex goals into small, verifiable steps. Think
+    carefully before calling tools. Always verify the results of your actions (e.g.,
+    via testing or checking output) before moving to the next subtask. If a tool fails,
+    analyze the failure, adapt your approach, and retry—never give up prematurely
+    or loop blindly.
+
+    2. FILE & PAYLOAD SAFETY: Never put hundreds of lines of code or content in a
+    single tool call. To create a non-trivial file, first `write_file` a short skeleton
+    (signatures and section headers only), then grow it section by section with `edit_file`,
+    keeping each replacement small. `apply_patch` is also acceptable for chunked creation.
+    If a tool call fails with malformed JSON, truncated output, or missing arguments,
+    retry with a SMALLER payload instead of repeating the same large one.
+
+    3. RESILIENCE & ADAPTABILITY: Pay strict attention to previous failure lessons
+    provided in the context. Never repeat an approach or command that has already
+    failed with the same parameters. If stuck, inspect the environment state, check
+    relevant files, or try an alternative path.
+
+    4. CONTEXT SUMMARY: When a `[SYSTEM CONTEXT COMPACTION SUMMARY]` message is present,
+    treat it as the authoritative record of prior progress, decisions, constraints,
+    and the next move. Build on it instead of re-deriving the work from scratch.
+
+    5. TOOL-CALL EFFICIENCY (critical — wasting these burns context and iterations):
+       - NEVER `write_file` a path you have already created. After the first creation,
+         make ALL modifications with `edit_file` or `apply_patch`. Rewriting an existing
+         file re-sends its ENTIRE content into context on every step. If you catch yourself
+         about to write a file you already wrote, STOP and use `edit_file` instead.
+       - For iterative debugging, write your debug/script to a FILE ONCE (e.g. `debug.R`),
+         then modify and re-run it. Do NOT paste the same setup/boilerplate (imports, seeds,
+         config, common helpers) inside `run_command`/`Rscript -e` on every iteration. If
+         you repeat the same 10+ lines of setup across calls, factor them into a sourced file.
+       - Verify the environment with a SINGLE chained command
+         (e.g. `cmd -v X || (install); X --version`). Do NOT run `which X`, then install,
+         then repeatedly `ls`/`cat` the same paths to "confirm". Never re-run an
+         install or command a previous step already completed successfully.
+       - Never repeat a command with identical parameters. If a prior call already gave
+         you the answer you needed, move on to the next step.'
+  iteration_limit_notice: Iteration limit reached. Summarize the progress and give
+    the best possible final answer. Do not call tools.
+tools:
+  enabled:
+  - run_command
+  - write_file
+  - read_file
+  - list_dir
+  - edit_file
+  - apply_patch
+  - grep_search
+  - glob_files
+  - find_symbol
+  - find_references
+  - execute_code
+control:
+  max_iterations: 100
+  max_observation_chars: 16000
+  spill_preview_chars: 4000
+memory:
+  strategy: llm_summary
+  head_chars: 200
+  context_budget: 60000
+  window_rounds: 12
+  keep_recent_rounds: 2
+  summary_tail_rounds: 2
+recovery:
+  tool_error: feed_error_and_continue
+  llm_errors:
+    provider_error:
+      max_retries: 0
+      backoff: exponential
+      base_delay: 0.5
+    stream_empty:
+      max_retries: 2
+      backoff: exponential
+      base_delay: 0.5
+    stream_idle_timeout:
+      max_retries: 2
+      backoff: exponential
+      base_delay: 0.5
+    stream_truncated:
+      max_retries: 2
+      backoff: exponential
+      base_delay: 0.5
+verification:
+  enabled: false
+skills: []

@@ -5,11 +5,15 @@ these strategies.  A strategy only produces the *view* of the history
 that gets sent to the LLM on each request, which keeps the on-disk
 trace, future phases (summarisation), and post-hoc analysis intact.
 
-Phase 1 ships ``compact_observations``: a deterministic, LLM-free
-window that replaces stale tool observations with one-line summaries
-once the request would exceed a character budget.  Message structure is
-preserved — a compacted tool message stays a tool message with the same
+``compact_observations`` is a deterministic, LLM-free window that
+replaces stale tool observations with one-line summaries once the request
+would exceed the context budget.  Message structure is preserved — a
+compacted tool message stays a tool message with the same
 ``tool_call_id`` — so the result is always a protocol-legal sequence.
+
+All knobs (budgets, windows, tail sizes) come from the harness's
+``MemoryGenome`` (see ``agent_runtime.harness``), threaded in by the
+caller; this module holds no policy constants of its own.
 """
 
 from __future__ import annotations
@@ -20,13 +24,16 @@ import os
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from agent_runtime.harness import (
+    DEFAULT_CONTEXT_BUDGET,
+    DEFAULT_HEAD_CHARS,
+    DEFAULT_KEEP_RECENT_ROUNDS,
+    DEFAULT_SUMMARY_TAIL_ROUNDS,
+    DEFAULT_WINDOW_ROUNDS,
+    MemoryGenome,
+)
 
-DEFAULT_CONTEXT_BUDGET = 60_000
-DEFAULT_WINDOW_ROUNDS = 12
-DEFAULT_KEEP_RECENT_ROUNDS = 2
-DEFAULT_HEAD_CHARS = 200
-DEFAULT_SUMMARY_TAIL_ROUNDS = 2
+logger = logging.getLogger(__name__)
 
 STRATEGY_FULL_HISTORY = "full_history"
 STRATEGY_COMPACT_OBSERVATIONS = "compact_observations"
@@ -67,23 +74,6 @@ Use exactly these sections:
 ## 3. Working Context & Anchors
 - **Relevant Files / Artifacts**: ...
 - **Environment State**: ..."""
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    try:
-        value = int(raw) if raw else default
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
-def _context_budget() -> int:
-    return _env_int("AGENT_RUNTIME_CONTEXT_BUDGET", DEFAULT_CONTEXT_BUDGET)
-
-
-def _window_rounds() -> int:
-    return _env_int("AGENT_RUNTIME_CONTEXT_WINDOW", DEFAULT_WINDOW_ROUNDS)
 
 
 def _message_chars(message: dict[str, Any]) -> int:
@@ -219,11 +209,15 @@ def compact_observations(messages: list[dict[str, Any]], *,
     return result
 
 
-async def apply_memory_strategy(messages: list[dict[str, Any]], strategy: str, *,
+async def apply_memory_strategy(messages: list[dict[str, Any]], memory: MemoryGenome, *,
                                 compact_messages: list[dict[str, Any]] | None = None,
                                 trace: Any = None, iteration: int | None = None,
                                 **options: Any) -> list[dict[str, Any]]:
-    """Build the request view of ``messages`` for the given strategy.
+    """Build the request view of ``messages`` under the memory genome.
+
+    ``memory`` is the harness's :class:`MemoryGenome` — strategy plus all
+    view-shaping knobs (budget, windows, tail sizes); this adapter unpacks
+    it into the strategy functions, which stay pure and parameter-driven.
 
     ``messages`` is the FULL conversation (the source of truth, never mutated
     here). ``compact_messages`` is the working/compacted view carried across
@@ -236,23 +230,26 @@ async def apply_memory_strategy(messages: list[dict[str, Any]], strategy: str, *
     event is emitted on ``trace`` (if provided) so the caller stays free of
     strategy logic.
     """
+    strategy = memory.strategy
     if strategy == STRATEGY_FULL_HISTORY:
         return messages
     if strategy not in (STRATEGY_COMPACT_OBSERVATIONS, STRATEGY_LLM_SUMMARY):
         raise ValueError(f"unknown memory strategy: {strategy!r}")
 
-    budget = options.get("budget") or _context_budget()
+    budget = memory.context_budget
     working = compact_messages if compact_messages is not None else messages
     if _total_chars(working) <= budget:
         return working
 
     if strategy == STRATEGY_COMPACT_OBSERVATIONS:
         result = compact_observations(messages, budget=budget,
-                                     window_rounds=_window_rounds())
+                                      window_rounds=memory.window_rounds,
+                                      keep_recent_rounds=memory.keep_recent_rounds,
+                                      head_chars=memory.head_chars)
     else:  # STRATEGY_LLM_SUMMARY
         result = await summarize_history(
             messages, budget=budget,
-            tail_rounds=options.get("tail_rounds"),
+            tail_rounds=memory.summary_tail_rounds,
             prompt=options.get("prompt"),
             session_memory_path=options.get("session_memory_path"))
 
@@ -287,10 +284,6 @@ def _get_summary_llm() -> Any:
         _summary_llm = OpenAICompatibleLLM(
             model=os.getenv("AGENT_RUNTIME_SUMMARY_MODEL") or None)
     return _summary_llm
-
-
-def _summary_tail_rounds() -> int:
-    return _env_int("AGENT_RUNTIME_SUMMARY_TAIL", DEFAULT_SUMMARY_TAIL_ROUNDS)
 
 
 def _session_memory_path() -> Path | None:
@@ -382,9 +375,9 @@ async def summarize_history(messages: list[dict[str, Any]], *,
     deterministic ``compact_observations`` so the turn still proceeds.
     """
     if budget is None:
-        budget = _context_budget()
+        budget = DEFAULT_CONTEXT_BUDGET
     if tail_rounds is None:
-        tail_rounds = _summary_tail_rounds()
+        tail_rounds = DEFAULT_SUMMARY_TAIL_ROUNDS
     llm = _get_summary_llm()
     if _total_chars(messages) <= budget:
         return messages

@@ -73,9 +73,14 @@ class AgentTurn:
         self.tools = tools
         # The tool executor owns the workspace (ToolRegistry binds it for
         # its file tools); observation spilling shares that same instance
-        # so references and tools always agree on where data lives.
+        # so references and tools always agree on where data lives.  Its
+        # knobs come from the harness genome; archive_min_chars derives
+        # from memory.head_chars so the invariant is structural.
         self.observations = ObservationFormatter(
-            getattr(self.tools, "workspace", None))
+            getattr(self.tools, "workspace", None),
+            max_chars=self.harness.control.max_observation_chars,
+            spill_preview_chars=self.harness.control.spill_preview_chars,
+            archive_min_chars=self.harness.memory.head_chars)
         self.user_message = user_message
         self.llm = llm
         self.conversation = conversation or Conversation()
@@ -111,7 +116,7 @@ class AgentTurn:
 
         for iteration in range(1, self.max_iterations + 1):
             try:
-                await history.refresh_view(harness.memory.strategy,
+                await history.refresh_view(harness.memory,
                                            trace=trace, iteration=iteration)
                 logger.debug(
                     "llm.request.start iteration=%d messages=%d tools=%d stream=%s",
@@ -229,7 +234,7 @@ class AgentTurn:
                         harness.prompt.iteration_limit_notice})
         iteration = self.max_iterations + 1
         try:
-            await history.refresh_view(harness.memory.strategy,
+            await history.refresh_view(harness.memory,
                                        trace=trace, iteration=iteration)
             logger.debug("llm.request.start iteration=%d messages=%d tools=0 stream=%s",
                          iteration, len(history.view), self.stream)

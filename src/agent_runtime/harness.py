@@ -108,6 +108,27 @@ def _default_llm_errors() -> dict[str, LLMRetryPolicy]:
 MEMORY_STRATEGIES: tuple[str, ...] = (
     "full_history", "compact_observations", "llm_summary")
 
+# Transcript-economics defaults: declared once here and consumed by the
+# memory strategies (agent.memory) and the observation boundary
+# (agent.observations).  The invariant "archive exactly what compaction
+# could truncate" is structural: the observation formatter receives
+# archive_min_chars = memory.head_chars, so the two can never drift.
+DEFAULT_HEAD_CHARS = 200                 # memory: compaction keeps this much of an old observation
+DEFAULT_CONTEXT_BUDGET = 60_000          # memory: request-view char budget that triggers compaction
+DEFAULT_WINDOW_ROUNDS = 12               # memory: compaction comfort window
+DEFAULT_KEEP_RECENT_ROUNDS = 2           # memory: rounds never compacted under budget pressure
+DEFAULT_SUMMARY_TAIL_ROUNDS = 2          # memory: llm_summary verbatim tail
+DEFAULT_MAX_OBSERVATION_CHARS = 16_000   # control: inline observation budget before windowing
+DEFAULT_SPILL_PREVIEW_CHARS = 4_000      # control: head/tail window half-size
+
+
+def _positive_int(value: Any, label: str, default: int) -> int:
+    if value is None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise HarnessError(f"{label} must be an integer >= 1")
+    return value
+
 
 @dataclass(frozen=True)
 class PromptGenome:
@@ -123,11 +144,18 @@ class ToolGenome:
 @dataclass(frozen=True)
 class ControlGenome:
     max_iterations: int = 10
+    max_observation_chars: int = DEFAULT_MAX_OBSERVATION_CHARS
+    spill_preview_chars: int = DEFAULT_SPILL_PREVIEW_CHARS
 
 
 @dataclass(frozen=True)
 class MemoryGenome:
     strategy: str = "full_history"
+    head_chars: int = DEFAULT_HEAD_CHARS
+    context_budget: int = DEFAULT_CONTEXT_BUDGET
+    window_rounds: int = DEFAULT_WINDOW_ROUNDS
+    keep_recent_rounds: int = DEFAULT_KEEP_RECENT_ROUNDS
+    summary_tail_rounds: int = DEFAULT_SUMMARY_TAIL_ROUNDS
 
 
 @dataclass(frozen=True)
@@ -268,24 +296,49 @@ def _control_genome(data: Mapping[str, Any]) -> ControlGenome:
     section = data.get("control") or {}
     if not isinstance(section, Mapping):
         raise HarnessError("control must be a mapping")
-    _check_keys(section, {"max_iterations"}, "control")
+    _check_keys(section, {"max_iterations", "max_observation_chars",
+                          "spill_preview_chars"}, "control")
     value = section.get("max_iterations", 10)
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise HarnessError("control.max_iterations must be an integer >= 1")
-    return ControlGenome(max_iterations=value)
+    return ControlGenome(
+        max_iterations=value,
+        max_observation_chars=_positive_int(
+            section.get("max_observation_chars"), "control.max_observation_chars",
+            DEFAULT_MAX_OBSERVATION_CHARS),
+        spill_preview_chars=_positive_int(
+            section.get("spill_preview_chars"), "control.spill_preview_chars",
+            DEFAULT_SPILL_PREVIEW_CHARS))
 
 
 def _memory_genome(data: Mapping[str, Any]) -> MemoryGenome:
     section = data.get("memory") or {}
     if not isinstance(section, Mapping):
         raise HarnessError("memory must be a mapping")
-    _check_keys(section, {"strategy"}, "memory")
+    _check_keys(section, {"strategy", "head_chars", "context_budget",
+                          "window_rounds", "keep_recent_rounds",
+                          "summary_tail_rounds"}, "memory")
     strategy = _required_text(section, "strategy", "memory", "full_history")
     if strategy not in MEMORY_STRATEGIES:
         raise HarnessError(
             f"memory.strategy must be one of {list(MEMORY_STRATEGIES)}, "
             f"got {strategy!r}")
-    return MemoryGenome(strategy=strategy)
+    return MemoryGenome(
+        strategy=strategy,
+        head_chars=_positive_int(section.get("head_chars"),
+                                 "memory.head_chars", DEFAULT_HEAD_CHARS),
+        context_budget=_positive_int(section.get("context_budget"),
+                                     "memory.context_budget",
+                                     DEFAULT_CONTEXT_BUDGET),
+        window_rounds=_positive_int(section.get("window_rounds"),
+                                    "memory.window_rounds",
+                                    DEFAULT_WINDOW_ROUNDS),
+        keep_recent_rounds=_positive_int(section.get("keep_recent_rounds"),
+                                         "memory.keep_recent_rounds",
+                                         DEFAULT_KEEP_RECENT_ROUNDS),
+        summary_tail_rounds=_positive_int(section.get("summary_tail_rounds"),
+                                          "memory.summary_tail_rounds",
+                                          DEFAULT_SUMMARY_TAIL_ROUNDS))
 
 
 def _recovery_genome(data: Mapping[str, Any]) -> RecoveryGenome:

@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent_runtime.agent.memory import apply_memory_strategy
+from agent_runtime.harness import MemoryGenome
 
 
 class Conversation:
@@ -55,11 +56,11 @@ class TurnHistory:
         self.messages.append(message)
         self.view.append(message)
 
-    async def refresh_view(self, strategy: str, *, trace: Any = None,
+    async def refresh_view(self, memory: MemoryGenome, *, trace: Any = None,
                            iteration: int | None = None) -> None:
-        """Rebuild the request view via the given memory strategy."""
+        """Rebuild the request view via the memory genome's strategy."""
         new_view = await apply_memory_strategy(
-            self.messages, strategy, compact_messages=self.view,
+            self.messages, memory, compact_messages=self.view,
             trace=trace, iteration=iteration)
         if new_view is not self.messages:
             self.view = new_view

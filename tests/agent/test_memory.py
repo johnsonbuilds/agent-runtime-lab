@@ -8,13 +8,13 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from agent_runtime.agent.memory import (
-    DEFAULT_CONTEXT_BUDGET,
     SUMMARY_PREFIX,
     apply_memory_strategy,
     compact_observations,
     set_summary_llm,
     summarize_history,
 )
+from agent_runtime.harness import DEFAULT_CONTEXT_BUDGET, MemoryGenome
 
 
 def tool_message(call_id: str, content: str,
@@ -213,20 +213,21 @@ class ApplyMemoryStrategyTests(unittest.IsolatedAsyncioTestCase):
     async def test_full_history_is_identity(self) -> None:
         messages = build_rounds(3, 100)
 
-        self.assertIs(await apply_memory_strategy(messages, "full_history"),
-                      messages)
+        self.assertIs(await apply_memory_strategy(
+            messages, MemoryGenome(strategy="full_history")), messages)
 
     async def test_compact_strategy_is_routed(self) -> None:
         messages = build_rounds(20, 5_000)
 
-        result = await apply_memory_strategy(messages, "compact_observations",
-                                             budget=10_000, window_rounds=6)
+        result = await apply_memory_strategy(
+            messages, MemoryGenome(strategy="compact_observations",
+                                   context_budget=10_000, window_rounds=6))
 
         self.assertIn("observation compacted", result[3]["content"])
 
     async def test_unknown_strategy_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown memory strategy"):
-            await apply_memory_strategy([], "summarize")
+            await apply_memory_strategy([], MemoryGenome(strategy="summarize"))
 
 
 class FakeSummaryLLM:
@@ -348,12 +349,13 @@ class ApplyMemoryStrategyLLMRoutingTests(unittest.IsolatedAsyncioTestCase):
         messages = build_rounds(10, 5_000)
         set_summary_llm(FakeSummaryLLM())
         result = await apply_memory_strategy(
-            messages, "llm_summary", budget=1_000, tail_rounds=2)
+            messages, MemoryGenome(strategy="llm_summary",
+                                   context_budget=1_000, summary_tail_rounds=2))
         self.assertEqual(sum(1 for m in result if m["role"] == "tool"), 2)
 
     async def test_unknown_strategy_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            await apply_memory_strategy([], "bogus")
+            await apply_memory_strategy([], MemoryGenome(strategy="bogus"))
 
 
 if __name__ == "__main__":
