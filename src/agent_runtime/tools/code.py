@@ -5,10 +5,9 @@ trips (write file, run command, read output), the model ships one
 complete script per tool call.  Intermediate data stays in workspace
 files or in-memory variables; only what the script prints comes back.
 
-Observation policy: stdout is returned in full when small; when it
-exceeds the limit the result carries a head/tail window and the full
-text is spilled to ``.outputs/`` where it can be paged with
-``read_file``.  stderr and exit_code are never truncated.
+Results are returned raw: truncation and spill-to-``.outputs/`` are the
+transcript boundary's job (agent_runtime.agent.observations), so every
+tool's oversized output is handled uniformly.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from __future__ import annotations
 import os
 import re
 import shlex
-from pathlib import PurePosixPath
 from typing import Any
 from agent_runtime.execution.base import ShellExecutor, Workspace
 from agent_runtime.execution.local import LocalShellExecutor, LocalWorkspace
@@ -46,7 +44,6 @@ SCRIPTS_DIR = ".scripts"
 OUTPUTS_DIR = ".outputs"
 DEFAULT_TIMEOUT = 120.0
 DEFAULT_MAX_OUTPUT_CHARS = 16_000
-OUTPUT_WINDOW_CHARS = 4_000
 
 _SEQUENCE = re.compile(r"^(\d{4})\.")
 
@@ -54,15 +51,6 @@ _SEQUENCE = re.compile(r"^(\d{4})\.")
 def _interpreter_for(language: str) -> str:
     interpreter = LANGUAGE_SPECS[language]["interpreter"]
     return interpreter() if callable(interpreter) else interpreter
-
-
-def _max_output_chars() -> int:
-    raw = os.getenv("AGENT_RUNTIME_MAX_OUTPUT_CHARS")
-    try:
-        value = int(raw) if raw else DEFAULT_MAX_OUTPUT_CHARS
-    except ValueError:
-        return DEFAULT_MAX_OUTPUT_CHARS
-    return value if value > 0 else DEFAULT_MAX_OUTPUT_CHARS
 
 
 async def _next_script_name(workspace: Workspace, extension: str) -> str:
@@ -161,21 +149,10 @@ async def execute_code(code: str, language: str = "python",
     result = await ex.execute(command, cwd=cwd, timeout=timeout)
     result = _with_interpreter_hint(result, language)
 
-    stdout: str = result.get("stdout") or ""
-    if len(stdout) > _max_output_chars():
-        head, tail = stdout[:OUTPUT_WINDOW_CHARS], stdout[-OUTPUT_WINDOW_CHARS:]
-        omitted = len(stdout) - len(head) - len(tail)
-        spill = f"{OUTPUTS_DIR}/{PurePosixPath(script).stem}.stdout.txt"
-        saved = await ws.write_file(spill, stdout)
-        if "error" not in saved:
-            marker = (f"\n... [{omitted} characters omitted; full output saved "
-                      f"to {spill}, page through it with read_file] ...\n")
-            result["stdout_full_path"] = spill
-        else:
-            marker = f"\n... [{omitted} characters omitted] ...\n"
-        result["stdout"] = head + marker + tail
-        result["stdout_chars"] = len(stdout)
-
+    # No truncation or spilling here: oversized output is handled once at
+    # the transcript boundary (agent_runtime.agent.observations), which
+    # spills every tool's bulky results to .outputs/ uniformly.  Returning
+    # the raw result keeps tool handlers policy-free.
     return {**result, "script_path": script, "language": language}
 
 

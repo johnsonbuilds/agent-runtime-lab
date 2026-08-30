@@ -143,34 +143,18 @@ class ExecuteCodeTests(unittest.IsolatedAsyncioTestCase):
                   "duration": 0.1}
         self.assertIs(_with_interpreter_hint(result, "python"), result)
 
-    async def test_small_stdout_is_returned_in_full(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            registry = make_registry(directory)
-
-            result = await registry.execute("execute_code", {
-                "code": "print('small')\n"})
-
-        self.assertEqual(result["stdout"], "small\n")
-        self.assertNotIn("stdout_chars", result)
-        self.assertNotIn("stdout_full_path", result)
-
-    async def test_oversized_stdout_is_windowed_and_spilled(self) -> None:
+    async def test_oversized_stdout_is_returned_raw_for_boundary_spill(self) -> None:
+        # Truncation/spilling moved to the transcript boundary
+        # (agent_runtime.agent.observations); the tool returns raw results.
         with tempfile.TemporaryDirectory() as directory:
             registry = make_registry(directory)
 
             result = await registry.execute("execute_code", {
                 "code": "print('x' * 20000)\n"})
-            spilled = await registry.execute("read_file", {
-                "path": ".outputs/0001.stdout.txt"})
 
-        window = result["stdout"]
-        self.assertEqual(result["stdout_chars"], 20001)
-        self.assertEqual(result["stdout_full_path"], ".outputs/0001.stdout.txt")
-        self.assertIn("characters omitted", window)
-        self.assertTrue(window.startswith("x" * 4000))
-        self.assertTrue(window.endswith("x" * 3999 + "\n"))
-        self.assertLess(len(window), result["stdout_chars"])
-        self.assertEqual(spilled["content"], "x" * 20000 + "\n")
+        self.assertEqual(result["stdout"], "x" * 20000 + "\n")
+        self.assertNotIn("stdout_chars", result)
+        self.assertNotIn("stdout_full_path", result)
 
     async def test_run_turn_feeds_one_observation_back_to_the_llm(self) -> None:
         llm = FakeLLM([

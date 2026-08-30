@@ -122,9 +122,18 @@ def _compact_tool_message(message: dict[str, Any], tool: str,
     content = message.get("content") or ""
     if len(content) <= head_chars:
         return message
-    summary = (f"[observation compacted: {tool} returned {len(content)} chars "
-               f"(exit code and first {head_chars} chars below); "
-               f"re-run the tool or read_file to see it again]\n")
+    spill_path = (message.get("metadata") or {}).get("spill_path")
+    # Spilled observations can be paged back losslessly; unspilled ones
+    # only exist in the (model-invisible) full history, so re-running is
+    # then the only recovery — say so honestly instead of forbidding it.
+    spill_note = (f" Full output file: {spill_path} (page it with "
+                  f"read_output; do NOT re-run the tool)."
+                  if spill_path
+                  else " The omitted middle is not recoverable without "
+                       "re-running the tool — do that only if you truly "
+                       "need it.")
+    summary = (f"[observation compacted: {tool} returned {len(content)} chars; "
+               f"first {head_chars} chars below.{spill_note}]\n")
     compacted = dict(message)
     compacted["content"] = summary + content[:head_chars]
     return compacted

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
-from typing import Any, Protocol
+from typing import Any
 
 from agent_runtime.agent.chat import (
     ChatModel,
@@ -32,6 +32,7 @@ from agent_runtime.agent.tool_dispatch import (
     _tool_trace_metadata,
     _trace_tool_rejection,
 )
+from agent_runtime.agent.observations import ObservationFormatter
 from agent_runtime.agent.turn_history import (
     Conversation,
     TurnHistory,
@@ -39,16 +40,10 @@ from agent_runtime.agent.turn_history import (
 )
 from agent_runtime.events import EventEmitter
 from agent_runtime.harness import HarnessSpec, default_harness
+from agent_runtime.tools import ToolExecutor
 from agent_runtime.trace import RunTrace
 
 logger = logging.getLogger(__name__)
-
-
-class ToolExecutor(Protocol):
-    @property
-    def schemas(self) -> list[dict[str, Any]]: ...
-
-    async def execute(self, name: str, arguments: Mapping[str, Any]) -> Any: ...
 
 
 class _TurnFailure(Exception):
@@ -75,9 +70,14 @@ class AgentTurn:
             else self.harness.control.max_iterations)
         self.trace = trace or RunTrace(harness=self.harness)
         self.events = events or EventEmitter(run_id=self.trace.run_id)
+        self.tools = tools
+        # The tool executor owns the workspace (ToolRegistry binds it for
+        # its file tools); observation spilling shares that same instance
+        # so references and tools always agree on where data lives.
+        self.observations = ObservationFormatter(
+            getattr(self.tools, "workspace", None))
         self.user_message = user_message
         self.llm = llm
-        self.tools = tools
         self.conversation = conversation or Conversation()
         self.stream = stream
 
@@ -219,7 +219,11 @@ class AgentTurn:
                         exc, tool=payload["tool"])
                     history.append(_tool_observation_message(tool_call, observation))
                     continue
-                history.append(_tool_observation_message(tool_call, str(result)))
+                rendered = await self.observations.render(result, validated.id)
+                metadata = ({"spill_path": rendered.spill_path}
+                            if rendered.spill_path else None)
+                history.append(_tool_observation_message(
+                    tool_call, rendered.text, metadata))
 
         history.append({"role": "user", "content":
                         harness.prompt.iteration_limit_notice})

@@ -135,11 +135,22 @@ def canonical_tool_calls(outcomes: list[ToolCallOutcome]) -> list[dict[str, Any]
             for outcome in outcomes if outcome.validated is not None]
 
 
-def _tool_observation_message(tool_call: Any, content: str) -> dict[str, Any]:
-    """Build the observation message for a tool call's outcome."""
+def _tool_observation_message(tool_call: Any, content: str,
+                              metadata: dict[str, Any] | None = None
+                              ) -> dict[str, Any]:
+    """Build the observation message for a tool call's outcome.
+
+    ``metadata`` carries programmatic side-channel data (e.g. a spill
+    path for the memory strategies); it never enters the model-facing
+    ``content``.
+    """
     call_id = tool_call.get("id", "") if isinstance(tool_call, Mapping) else ""
     if isinstance(call_id, str) and call_id:
-        return {"role": "tool", "tool_call_id": call_id, "content": content}
+        message: dict[str, Any] = {"role": "tool", "tool_call_id": call_id,
+                                   "content": content}
+        if metadata:
+            message["metadata"] = metadata
+        return message
     # The model must retry because a tool message cannot be correlated without an ID.
     return {
         "role": "user",

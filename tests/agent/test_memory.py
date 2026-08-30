@@ -17,8 +17,13 @@ from agent_runtime.agent.memory import (
 )
 
 
-def tool_message(call_id: str, content: str) -> dict[str, Any]:
-    return {"role": "tool", "tool_call_id": call_id, "content": content}
+def tool_message(call_id: str, content: str,
+                 metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": "tool", "tool_call_id": call_id,
+                               "content": content}
+    if metadata:
+        message["metadata"] = metadata
+    return message
 
 
 def assistant_message(call_id: str, name: str = "run_command",
@@ -147,6 +152,38 @@ class CompactObservationsTests(unittest.TestCase):
 
         self.assertIn("read_file", result[3]["content"])
         self.assertIn("3000 chars", result[3]["content"])
+
+    def test_spilled_observation_points_to_metadata_spill_path(self) -> None:
+        # The spill reference travels as structured message metadata, not
+        # as a string scanned out of the content.
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+            assistant_message("c1", name="run_command"),
+            tool_message("c1", "y" * 3_000,
+                         metadata={"spill_path": ".outputs/obs-0001.txt"}),
+        ]
+
+        result = compact_observations(messages, budget=10, window_rounds=0)
+
+        content = result[3]["content"]
+        self.assertIn(".outputs/obs-0001.txt", content)
+        self.assertIn("read_output", content)
+        self.assertIn("do NOT re-run", content)
+
+    def test_unspilled_observation_admits_re_run_is_the_only_recovery(self) -> None:
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+            assistant_message("c1", name="run_command"),
+            tool_message("c1", "y" * 3_000),
+        ]
+
+        result = compact_observations(messages, budget=10, window_rounds=0)
+
+        content = result[3]["content"]
+        self.assertNotIn("Full output file", content)
+        self.assertIn("only if you truly need it", content)
 
     def test_system_and_user_messages_are_never_touched(self) -> None:
         messages = build_rounds(20, 5_000)

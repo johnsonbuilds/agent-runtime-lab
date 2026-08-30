@@ -6,17 +6,29 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 import inspect
-from typing import Any
+from typing import Any, Protocol
 
 from agent_runtime.execution.base import ShellExecutor, Workspace
 from agent_runtime.execution.local import LocalShellExecutor, LocalWorkspace
 
 from .code import execute_code
-from .files import DEFAULT_READ_LIMIT, edit_file, list_dir, read_file, write_file
+from .files import DEFAULT_READ_LIMIT, edit_file, list_dir, read_file, read_output, write_file
 from .patch import apply_patch
 from .search import DEFAULT_GREP_RESULTS, DEFAULT_GLOB_RESULTS, glob_files, grep_search
 from .shell import run_command
 from .symbols import TreeSitterIndex, find_references, find_symbol
+
+
+class ToolExecutor(Protocol):
+    """What the agent loop needs from a tool layer: schemas to advertise
+    and ``execute`` to run one call.  :class:`ToolRegistry` is the
+    built-in implementation; tests and integrations may supply their own.
+    """
+
+    @property
+    def schemas(self) -> list[dict[str, Any]]: ...
+
+    async def execute(self, name: str, arguments: Mapping[str, Any]) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -35,10 +47,15 @@ class ToolSpec:
 
 
 class ToolRegistry:
-    def __init__(self, specs: list[ToolSpec] | None = None) -> None:
+    def __init__(self, specs: list[ToolSpec] | None = None, *,
+                 workspace: Workspace | None = None) -> None:
         self._tools: dict[str, ToolSpec] = {}
         for spec in specs or []:
             self.register(spec)
+        # The registry owns the shared workspace: file tools bind it, and
+        # harness layers (e.g. observation spilling) read it from here so
+        # there is exactly one workspace instance per run.
+        self.workspace = workspace
 
     @property
     def schemas(self) -> list[dict[str, Any]]:
@@ -104,6 +121,27 @@ def _read_file_spec(workspace: Workspace) -> ToolSpec:
                                   "default": DEFAULT_READ_LIMIT}},
                      "required": ["path"]},
                     partial(read_file, workspace=workspace))
+
+
+def _read_output_spec(workspace: Workspace) -> ToolSpec:
+    return ToolSpec("read_output",
+                    "Page through a tool output that was saved under .outputs/ "
+                    "when it exceeded the transcript budget (the observation "
+                    "names the file). Returns one page of lines at a time; "
+                    "continue with a larger offset when the result reports "
+                    "truncated: true. Never re-run a tool just to see its "
+                    "output again — page the saved file instead.",
+                    {"type": "object", "properties": {
+                        "path": {"type": "string",
+                                 "description": "Path under .outputs/"},
+                        "offset": {"type": "integer",
+                                   "description": "First line to return (1-based)",
+                                   "default": 1},
+                        "limit": {"type": "integer",
+                                  "description": "Maximum number of lines to return",
+                                  "default": DEFAULT_READ_LIMIT}},
+                     "required": ["path"]},
+                    partial(read_output, workspace=workspace))
 
 
 def _list_dir_spec(workspace: Workspace) -> ToolSpec:
@@ -270,6 +308,7 @@ def builtin_tool_specs(executor: ShellExecutor | None = None,
         _run_command_spec(shell_executor, file_workspace),
         _write_file_spec(file_workspace),
         _read_file_spec(file_workspace),
+        _read_output_spec(file_workspace),
         _list_dir_spec(file_workspace),
         _edit_file_spec(file_workspace),
         _apply_patch_spec(file_workspace),
@@ -287,13 +326,24 @@ def create_default_registry(executor: ShellExecutor | None = None,
     """Build the tool registry, optionally filtered by the harness gene.
 
     ``enabled=None`` keeps every built-in tool; otherwise the registry
-    exposes exactly the named tools, in the given order.
+    exposes exactly the named tools (plus the always-on ``read_output``
+    pager), in the given order.  ``workspace`` becomes the registry's
+    shared workspace; when omitted a default one is created here and
+    carried on the registry, so every tool and the observation spiller
+    share one instance.
     """
-    specs = builtin_tool_specs(executor, workspace)
+    shell_executor = executor if executor is not None else LocalShellExecutor()
+    file_workspace = workspace if workspace is not None else LocalWorkspace()
+    specs = builtin_tool_specs(shell_executor, file_workspace)
     if enabled is None:
-        return ToolRegistry(specs)
+        return ToolRegistry(specs, workspace=file_workspace)
     by_name = {spec.name: spec for spec in specs}
     unknown = [name for name in enabled if name not in by_name]
     if unknown:
         raise ValueError(f"Unknown tools in harness: {unknown}")
-    return ToolRegistry([by_name[name] for name in enabled])
+    # read_output is infrastructure, not a harness gene: the observation
+    # spiller writes references under .outputs/ that only this tool can
+    # page, so it ships with every harness regardless of the tool list.
+    names = list(dict.fromkeys([*enabled, "read_output"]))
+    return ToolRegistry([by_name[name] for name in names],
+                        workspace=file_workspace)

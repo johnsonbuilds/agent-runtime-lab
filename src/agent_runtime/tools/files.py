@@ -8,10 +8,12 @@ to ``ShellExecutor``.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Any
 
 from agent_runtime.execution.base import Workspace
 from agent_runtime.execution.local import LocalWorkspace
+from agent_runtime.tools.code import OUTPUTS_DIR
 
 
 DEFAULT_READ_LIMIT = 2000
@@ -26,6 +28,25 @@ async def write_file(path: str, content: str, *,
 async def read_file(path: str, offset: int = 1, limit: int | None = DEFAULT_READ_LIMIT, *,
                     workspace: Workspace | None = None) -> dict[str, Any]:
     """Read a file as text, one page of lines at a time."""
+    return await (workspace or LocalWorkspace()).read_file(path, offset, limit)
+
+
+async def read_output(path: str, offset: int = 1,
+                      limit: int | None = DEFAULT_READ_LIMIT, *,
+                      workspace: Workspace | None = None) -> dict[str, Any]:
+    """Page through a spilled tool output saved under ``.outputs/``.
+
+    Companion to the observation spiller: when a tool result exceeds the
+    transcript budget, its full text lands in ``.outputs/`` and the model
+    pages through it here instead of re-running the tool.  Paths outside
+    ``.outputs/`` are rejected.
+    """
+    candidate = PurePosixPath(path)
+    if (candidate.is_absolute() or ".." in candidate.parts
+            or not candidate.parts or candidate.parts[0] != OUTPUTS_DIR):
+        return {"path": path,
+                "error": {"type": "InvalidPath",
+                          "message": f"read_output only reads files under {OUTPUTS_DIR}/"}}
     return await (workspace or LocalWorkspace()).read_file(path, offset, limit)
 
 
@@ -66,5 +87,6 @@ async def edit_file(path: str, old_str: str, new_str: str, *,
 
 
 __all__ = [
-    "DEFAULT_READ_LIMIT", "edit_file", "list_dir", "read_file", "write_file",
+    "DEFAULT_READ_LIMIT", "edit_file", "list_dir", "read_file", "read_output",
+    "write_file",
 ]
