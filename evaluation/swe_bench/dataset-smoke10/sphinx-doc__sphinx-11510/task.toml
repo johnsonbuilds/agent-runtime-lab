@@ -10,4 +10,4 @@ timeout_sec = 3600.0
 
 [environment]
 build_timeout_sec = 600.0
-docker_image = "swebench/sweb.eval.x86_64.sphinx-doc__sphinx-11510:latest"
+docker_image = "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-11510:latest"

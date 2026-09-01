@@ -10,4 +10,4 @@ timeout_sec = 3600.0
 
 [environment]
 build_timeout_sec = 600.0
-docker_image = "swebench/sweb.eval.x86_64.pylint-dev__pylint-6903:latest"
+docker_image = "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-6903:latest"

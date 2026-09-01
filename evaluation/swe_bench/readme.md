@@ -4,7 +4,7 @@
 **你机器上三步**（文件都在刚发的 swe_bench/ 里，按原路径拷进 repo）：
 ```bash
 # 0) 先拉镜像（首次，验证 latest tag 存在）
-for id in $(python3 -c "import json;print(' '.join(json.load(open('evaluation/swe_bench/smoke-10.json'))['instance_ids']))"); do docker pull swebench/sweb.eval.x86_64.$id:latest; done
+for id in $(python3 -c "import json;print(' '.join(json.load(open('evaluation/swe_bench/smoke-10.json'))['instance_ids']))"); do docker pull swebench/sweb.eval.x86_64.$(echo $id | sed 's/__/_1776_/'):latest; done
 
 # 1) 两臂（建议先加 -l 1 单任务试跑一条）
 AGENT_RUNTIME_HARNESS=code-v1  uv run harbor run -d evaluation/swe_bench/dataset-smoke10 --agent agent_runtime.integrations.harbor:HarborAgent

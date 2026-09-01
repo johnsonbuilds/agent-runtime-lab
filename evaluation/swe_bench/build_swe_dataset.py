@@ -42,6 +42,8 @@ MANIFEST_URL = (
     "/repo?Revision=master&FilePath=data/test-00000-of-00001.parquet"
 )
 IMAGE_PREFIX = "swebench/sweb.eval.x86_64"
+# Docker Hub uses _1776_ instead of __ in instance_ids
+IMAGE_SUFFIX_MAP = {"__": "_1776_"}
 
 TEST_HEADER = """\
 #!/bin/bash
@@ -49,6 +51,9 @@ TEST_HEADER = """\
 set -u
 cd /testbed || exit 1
 LOG=/tests/eval_output.log
+
+# Use the testbed conda environment
+export PATH=/opt/miniconda3/envs/testbed/bin:$PATH
 """
 
 TEST_BODY_RESET = """
@@ -185,6 +190,10 @@ def build_task(out_dir: Path, row: dict, image_tag: str) -> None:
     (tdir / "tests").mkdir(parents=True, exist_ok=True)
     (tdir / "environment").mkdir(exist_ok=True)
 
+    # Convert instance_id to Docker Hub image name format
+    # Docker Hub uses _1776_ instead of __
+    hub_tid = tid.replace("__", "_1776_")
+
     (tdir / "instruction.md").write_text(
         INSTRUCTION.format(repo=row["repo"], base_commit=row["base_commit"],
                            problem_statement=row["problem_statement"]),
@@ -197,7 +206,7 @@ def build_task(out_dir: Path, row: dict, image_tag: str) -> None:
         "#!/bin/bash\n# Debug helper: apply the gold patch, then re-verify.\n"
         f"cd /testbed && git apply /tests/gold.patch\n", encoding="utf-8")
     (tdir / "environment" / "README.md").write_text(
-        f"Prebuilt SWE-bench eval image: {IMAGE_PREFIX}.{tid}:{image_tag}\n"
+        f"Prebuilt SWE-bench eval image: {IMAGE_PREFIX}.{hub_tid}:{image_tag}\n"
         f"repo={row['repo']} base_commit={row['base_commit']}\n"
         f"env_setup_commit={row['environment_setup_commit']}\n",
         encoding="utf-8")
@@ -215,7 +224,7 @@ timeout_sec = 3600.0
 
 [environment]
 build_timeout_sec = 600.0
-docker_image = "{IMAGE_PREFIX}.{tid}:{image_tag}"
+docker_image = "{IMAGE_PREFIX}.{hub_tid}:{image_tag}"
 """, encoding="utf-8")
 
     exit_var = None  # exit code flows via RUNNER_EXIT env var
