@@ -25,6 +25,8 @@ import json, os, re, sys
 log = open("/tests/eval_output.log", encoding="utf-8", errors="replace").read()
 f2p = '["testing/test_pastebin.py::TestPaste::test_create_new_paste"]'
 p2p = '["testing/test_pastebin.py::TestPasteCapture::test_failed", "testing/test_pastebin.py::TestPasteCapture::test_all", "testing/test_pastebin.py::TestPasteCapture::test_non_ascii_paste_text"]'
+f2p = json.loads(f2p)
+p2p = json.loads(p2p)
 runner = 'pytest'
 exit_code = int(os.environ.get("RUNNER_EXIT", "1"))
 

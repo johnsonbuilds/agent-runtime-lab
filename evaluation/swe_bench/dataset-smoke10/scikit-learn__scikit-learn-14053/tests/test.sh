@@ -25,6 +25,8 @@ import json, os, re, sys
 log = open("/tests/eval_output.log", encoding="utf-8", errors="replace").read()
 f2p = '["sklearn/tree/tests/test_export.py::test_export_text"]'
 p2p = '["sklearn/tree/tests/test_export.py::test_graphviz_toy", "sklearn/tree/tests/test_export.py::test_graphviz_errors", "sklearn/tree/tests/test_export.py::test_friedman_mse_in_graphviz", "sklearn/tree/tests/test_export.py::test_precision", "sklearn/tree/tests/test_export.py::test_export_text_errors"]'
+f2p = json.loads(f2p)
+p2p = json.loads(p2p)
 runner = 'pytest'
 exit_code = int(os.environ.get("RUNNER_EXIT", "1"))
 

@@ -25,6 +25,8 @@ import json, os, re, sys
 log = open("/tests/eval_output.log", encoding="utf-8", errors="replace").read()
 f2p = '["tests/test_directive_other.py::test_include_source_read_event", "tests/test_directive_other.py::test_include_source_read_event_nested_includes"]'
 p2p = '["tests/test_directive_other.py::test_toctree", "tests/test_directive_other.py::test_relative_toctree", "tests/test_directive_other.py::test_toctree_urls_and_titles", "tests/test_directive_other.py::test_toctree_glob", "tests/test_directive_other.py::test_toctree_glob_and_url", "tests/test_directive_other.py::test_reversed_toctree", "tests/test_directive_other.py::test_toctree_twice"]'
+f2p = json.loads(f2p)
+p2p = json.loads(p2p)
 runner = 'pytest'
 exit_code = int(os.environ.get("RUNNER_EXIT", "1"))
 

@@ -25,6 +25,8 @@ import json, os, re, sys
 log = open("/tests/eval_output.log", encoding="utf-8", errors="replace").read()
 f2p = '["test_subs_CondSet"]'
 p2p = '["test_CondSet", "test_CondSet_intersect", "test_issue_9849", "test_simplified_FiniteSet_in_CondSet", "test_free_symbols", "test_subs_CondSet_tebr", "test_dummy_eq", "test_contains"]'
+f2p = json.loads(f2p)
+p2p = json.loads(p2p)
 runner = 'sympy'
 exit_code = int(os.environ.get("RUNNER_EXIT", "1"))
 

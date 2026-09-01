@@ -25,6 +25,8 @@ import json, os, re, sys
 log = open("/tests/eval_output.log", encoding="utf-8", errors="replace").read()
 f2p = '["tests/test_pylint_runners.py::test_pylint_run_jobs_equal_zero_dont_crash_with_cpu_fraction"]'
 p2p = '["tests/test_pylint_runners.py::test_runner[run_epylint]", "tests/test_pylint_runners.py::test_runner[run_pylint]", "tests/test_pylint_runners.py::test_runner[run_pyreverse]", "tests/test_pylint_runners.py::test_runner[run_symilar]", "tests/test_pylint_runners.py::test_runner_with_arguments[run_epylint]", "tests/test_pylint_runners.py::test_runner_with_arguments[run_pylint]", "tests/test_pylint_runners.py::test_runner_with_arguments[run_pyreverse]", "tests/test_pylint_runners.py::test_runner_with_arguments[run_symilar]"]'
+f2p = json.loads(f2p)
+p2p = json.loads(p2p)
 runner = 'pytest'
 exit_code = int(os.environ.get("RUNNER_EXIT", "1"))
 
