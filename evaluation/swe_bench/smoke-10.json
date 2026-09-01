@@ -1,0 +1,19 @@
+{
+  "source": "https://modelscope.cn/api/v1/datasets/princeton-nlp/SWE-bench_Verified/repo?Revision=master&FilePath=data/test-00000-of-00001.parquet",
+  "seed": 42,
+  "rule": "single rotation stream: shuffle repo order + per-repo ids (random.Random(42)), round-robin; first 50 = dev-50, next 10 = smoke-10",
+  "manifest_rows": 500,
+  "count": 10,
+  "instance_ids": [
+    "astropy__astropy-14309",
+    "django__django-13449",
+    "sphinx-doc__sphinx-11510",
+    "pylint-dev__pylint-6903",
+    "psf__requests-1921",
+    "matplotlib__matplotlib-26342",
+    "pytest-dev__pytest-5809",
+    "scikit-learn__scikit-learn-14053",
+    "pydata__xarray-6938",
+    "sympy__sympy-19495"
+  ]
+}
