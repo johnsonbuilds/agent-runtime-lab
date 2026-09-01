@@ -73,14 +73,18 @@ p2p = {p2p_json!r}
 runner = {runner!r}
 exit_code = int(os.environ.get("RUNNER_EXIT", "1"))
 
+# Strip ANSI color codes
+ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+clean_log = ansi_escape.sub('', log)
+
 def pytest_ok(tid: str) -> bool:
-    return re.search(rf"^PASSED {{re.escape(tid)}}$", log, re.M) is not None
+    return re.search(rf"^PASSED {{re.escape(tid)}}$", clean_log, re.M) is not None
 
 def django_ok(tid: str) -> bool:
-    return re.search(rf"^{{re.escape(tid)}}\s+\.\.\. ok$", log, re.M) is not None
+    return re.search(rf"^{{re.escape(tid)}}\s+\.\.\. ok$", clean_log, re.M) is not None
 
 def sympy_ok(tid: str) -> bool:
-    return (re.search(rf"^{{re.escape(tid)}}\s*(?:ok|\[OK\])\s*$", log, re.M)
+    return (re.search(rf"^{{re.escape(tid)}}\s*(?:ok|\[OK\])\s*$", clean_log, re.M)
             is not None)
 
 check = {{"pytest": pytest_ok, "django": django_ok, "sympy": sympy_ok}}[runner]

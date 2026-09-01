@@ -29,7 +29,10 @@ runner = 'pytest'
 exit_code = int(os.environ.get("RUNNER_EXIT", "1"))
 
 def pytest_ok(tid: str) -> bool:
-    return re.search(rf"^PASSED {re.escape(tid)}$", log, re.M) is not None
+    # Strip ANSI color codes before matching
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    clean_log = ansi_escape.sub('', log)
+    return re.search(rf"^PASSED {re.escape(tid)}$", clean_log, re.M) is not None
 
 def django_ok(tid: str) -> bool:
     return re.search(rf"^{re.escape(tid)}\s+\.\.\. ok$", log, re.M) is not None
