@@ -4,6 +4,9 @@ set -u
 cd /testbed || exit 1
 LOG=/tests/eval_output.log
 
+# Use the testbed conda environment
+export PATH=/opt/miniconda3/envs/testbed/bin:$PATH
+
 # Reset test files to base state, then apply the official test patch.
 git checkout c4e40d991c28be51de9ac560ce895ac7f9b14924 -- xarray/tests/test_variable.py
 git apply -v /tests/test_patch.diff > /dev/null 2>&1 || git apply /tests/test_patch.diff

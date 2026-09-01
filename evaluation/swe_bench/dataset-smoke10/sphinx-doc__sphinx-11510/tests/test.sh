@@ -4,6 +4,9 @@ set -u
 cd /testbed || exit 1
 LOG=/tests/eval_output.log
 
+# Use the testbed conda environment
+export PATH=/opt/miniconda3/envs/testbed/bin:$PATH
+
 # Reset test files to base state, then apply the official test patch.
 git checkout 6cb783c0024a873722952a67ebb9f41771c8eb6d -- tests/roots/test-directive-include/baz/baz.rst tests/roots/test-directive-include/conf.py tests/roots/test-directive-include/foo.rst tests/roots/test-directive-include/text.txt tests/test_directive_other.py
 git apply -v /tests/test_patch.diff > /dev/null 2>&1 || git apply /tests/test_patch.diff

@@ -4,6 +4,9 @@ set -u
 cd /testbed || exit 1
 LOG=/tests/eval_output.log
 
+# Use the testbed conda environment
+export PATH=/opt/miniconda3/envs/testbed/bin:$PATH
+
 # Reset test files to base state, then apply the official test patch.
 git checkout 25fbcce5b1a4c7e3956e6062930f4a44ce95a632 -- sympy/sets/tests/test_conditionset.py
 git apply -v /tests/test_patch.diff > /dev/null 2>&1 || git apply /tests/test_patch.diff

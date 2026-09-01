@@ -4,6 +4,9 @@ set -u
 cd /testbed || exit 1
 LOG=/tests/eval_output.log
 
+# Use the testbed conda environment
+export PATH=/opt/miniconda3/envs/testbed/bin:$PATH
+
 # Reset test files to base state, then apply the official test patch.
 git checkout 6ab8c86c383dd847a1be7103ad115f174fe23ffd -- sklearn/tree/tests/test_export.py
 git apply -v /tests/test_patch.diff > /dev/null 2>&1 || git apply /tests/test_patch.diff
