@@ -17,9 +17,10 @@ done
 ### 2. 运行单个任务（测试）
 
 ```bash
-# 运行单个任务
+# 运行单个任务（使用 code-v1 harness，包含文件编辑工具）
 uv run harbor run -p evaluation/swe_bench/dataset-smoke10/astropy__astropy-14309 \
-  --agent agent_runtime.integrations.harbor:HarborAgent -y
+  --agent agent_runtime.integrations.harbor:HarborAgent \
+  --config harnesses/code-v1.yaml -y
 
 # 查看结果
 cat jobs/<job-id>/result.json
@@ -29,14 +30,14 @@ cat jobs/<job-id>/<task-id>/verifier/rewards.json
 ### 3. 运行全部任务
 
 ```bash
-# code-v1 臂
-AGENT_RUNTIME_HARHarness=code-v1 uv run harbor run \
-  -d evaluation/swe_bench/dataset-smoke10 \
+# code-v1 臂（包含 run_command, read_file, apply_patch）
+AGENT_RUNTIME_HARNESS=code-v1 uv run harbor run \
+  -p evaluation/swe_bench/dataset-smoke10 \
   --agent agent_runtime.integrations.harbor:HarborAgent
 
-# meta-v12 臂
+# meta-v12 臂（更多工具）
 AGENT_RUNTIME_HARNESS=meta-v12 uv run harbor run \
-  -d evaluation/swe_bench/dataset-smoke10 \
+  -p evaluation/swe_bench/dataset-smoke10 \
   --agent agent_runtime.integrations.harbor:HarborAgent
 ```
 
@@ -44,8 +45,9 @@ AGENT_RUNTIME_HARNESS=meta-v12 uv run harbor run \
 
 ```bash
 # 只跑前 3 个任务
-uv run harbor run -d evaluation/swe_bench/dataset-smoke10 \
-  --agent agent_runtime.integrations.harbor:HarborAgent -l 3
+uv run harbor run -p evaluation/swe_bench/dataset-smoke10 \
+  --agent agent_runtime.integrations.harbor:HarborAgent \
+  --config harnesses/code-v1.yaml -l 3
 ```
 
 ## 任务列表（smoke-10）
@@ -82,6 +84,26 @@ evaluation/swe_bench/
         │   ├── test_patch.diff
         │   └── gold.patch
         └── environment/README.md
+```
+
+## Harness 选择
+
+SWE-bench 任务需要文件编辑工具才能修复代码。推荐使用以下 harness：
+
+| Harness | 工具 | 适用场景 |
+|---------|------|----------|
+| `baseline-v0` | run_command | 只读分析 |
+| `code-v1` | run_command, read_file, apply_patch | **推荐** - 代码修复 |
+| `files-v1` | run_command, write_file, read_file, list_dir | 文件操作 |
+| `meta-v1` | run_command, write_file, read_file, list_dir, edit_file, apply_patch, grep_search, glob_files | 完整工具集 |
+
+**运行命令示例：**
+```bash
+# 使用环境变量
+AGENT_RUNTIME_HARNESS=code-v1 uv run harbor run ...
+
+# 或使用 --config 参数
+uv run harbor run ... --config harnesses/code-v1.yaml
 ```
 
 ## 注意事项
