@@ -14,6 +14,8 @@ from typing import Any
 from agent_runtime.execution.base import Workspace
 from agent_runtime.execution.local import LocalWorkspace
 from agent_runtime.tools.code import OUTPUTS_DIR
+from agent_runtime.tools.edit_match import apply_edit
+from agent_runtime.tools.syntax_gate import syntax_error
 
 
 DEFAULT_READ_LIMIT = 2000
@@ -60,9 +62,13 @@ async def edit_file(path: str, old_str: str, new_str: str, *,
                     workspace: Workspace | None = None) -> dict[str, Any]:
     """Replace exactly one occurrence of ``old_str`` with ``new_str``.
 
-    ``old_str`` must match exactly once: zero matches or several
-    matches raise, which pushes the model to read the file and
-    disambiguate with more surrounding lines.
+    Matching runs the edit-match ladder (see ``edit_match``): exact bytes
+    first, then de-numbered / indent-insensitive fallbacks.  Every level
+    must match exactly once — zero or ambiguous matches raise with a
+    rendered diagnosis, and non-exact levels are reported back via
+    ``match_mode`` so nothing is silently normalized.  Before writing,
+    the edited content passes a syntax gate (see ``syntax_gate``);
+    extensions without a checker are exempt.
     """
     if not old_str:
         raise ValueError("old_str must not be empty")
@@ -71,18 +77,17 @@ async def edit_file(path: str, old_str: str, new_str: str, *,
     if "error" in read:
         return read
     content = read["content"]
-    occurrences = content.count(old_str)
-    if occurrences == 0:
-        raise ValueError(f"old_str not found in {path}")
-    if occurrences > 1:
+    updated, mode = apply_edit(content, old_str, new_str)
+    problem = syntax_error(path, updated)
+    if problem:
         raise ValueError(
-            f"old_str appears {occurrences} times in {path}; "
-            "include more surrounding lines to make it unique")
-    updated = content.replace(old_str, new_str, 1)
+            f"edit_file: {path}: edited content fails syntax check ({problem}). "
+            "Nothing was written; fix the edit, or use write_file if the "
+            "intermediate state is intentional.")
     written = await ws.write_file(path, updated)
     if "error" in written:
         return written
-    return {"path": path, "occurrences_replaced": 1,
+    return {"path": path, "occurrences_replaced": 1, "match_mode": mode,
             "bytes_written": written["bytes_written"]}
 
 

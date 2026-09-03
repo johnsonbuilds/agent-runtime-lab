@@ -27,11 +27,20 @@ from typing import Any
 
 from agent_runtime.execution.base import Workspace
 from agent_runtime.execution.local import LocalWorkspace
+from agent_runtime.tools.edit_match import MatchError, apply_edit
+from agent_runtime.tools.syntax_gate import syntax_error
 
 
 BEGIN = "<<<<<<< SEARCH"
 SEP = "======="
 END = ">>>>>>> REPLACE"
+
+# Lines a merge conflict leaves inside file content.  When the SEARCH or
+# REPLACE text itself contains one, the block grammar cannot express the
+# edit (the marker is indistinguishable from the section delimiters) —
+# parse_patch points the model at edit_file instead of reporting a
+# misleading syntax error.
+_CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 
 
 @dataclass
@@ -68,6 +77,13 @@ def parse_patch(patch: str) -> _Patch:
             section, body, old_lines = "old", [], []
         elif line.strip() == SEP:
             if section != "old":
+                if any(ln.lstrip().startswith(_CONFLICT_MARKERS)
+                       for ln in body + old_lines):
+                    raise fail(number,
+                               f"{SEP} inside block content: the SEARCH/REPLACE "
+                               "text itself contains a separator line (merge-"
+                               "conflict markers?); apply_patch cannot express "
+                               "this — use edit_file for this edit instead")
                 raise fail(number, f"{SEP} is only valid inside a SEARCH section")
             section, old_lines, body = "new", list(body), []
         elif line.strip() == END:
@@ -103,6 +119,7 @@ async def apply_patch(patch: str, *,
     ws = workspace or LocalWorkspace()
 
     files: dict[str, dict[str, Any]] = {}
+    match_modes: list[str] = []  # per-block, in patch order; audit trail
     for block in parsed.blocks:
         state = files.get(block.path)
         if state is None:
@@ -128,17 +145,20 @@ async def apply_patch(patch: str, *,
             raise ValueError(
                 f"apply_patch: block {block.index}: file {block.path} does "
                 "not exist; use an empty SEARCH section to create it")
-        occurrences = content.count(block.old)
-        if occurrences == 0:
+        try:
+            state["content"], mode = apply_edit(content, block.old, block.new)
+        except MatchError as exc:
             raise ValueError(
-                f"apply_patch: block {block.index}: SEARCH text not found in "
-                f"{block.path}; read the file and copy the exact text")
-        if occurrences > 1:
+                f"apply_patch: block {block.index}: {exc}") from exc
+        match_modes.append(mode)
+
+    for path, state in files.items():
+        problem = syntax_error(path, state["content"] or "")
+        if problem:
             raise ValueError(
-                f"apply_patch: block {block.index}: SEARCH text appears "
-                f"{occurrences} times in {block.path}; include more "
-                "surrounding lines to make it unique")
-        state["content"] = content.replace(block.old, block.new, 1)
+                f"apply_patch: {path}: edited content fails syntax check "
+                f"({problem}). Nothing was written; fix the edit, or use "
+                "write_file if the intermediate state is intentional.")
 
     created: list[str] = []
     updated: list[str] = []
@@ -154,6 +174,7 @@ async def apply_patch(patch: str, *,
         "blocks_applied": len(parsed.blocks),
         "files_created": created,
         "files_updated": updated,
+        "match_modes": match_modes,
         "bytes_written": bytes_written,
     }
 
