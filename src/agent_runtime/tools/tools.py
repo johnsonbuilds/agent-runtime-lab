@@ -158,9 +158,10 @@ def _list_dir_spec(workspace: Workspace) -> ToolSpec:
 
 def _edit_file_spec(workspace: Workspace) -> ToolSpec:
     return ToolSpec("edit_file",
-                    "Replace exactly one occurrence of old_str with new_str in "
-                    "a file. old_str must match exactly once; include more "
-                    "surrounding lines when it is ambiguous.",
+                    "Replace exactly one occurrence of old_str with new_str in a file."
+                    "old_str must match uniquely (exact first, tolerant fallbacks; "
+                    "the applied mode is reported back as match_mode). "
+                    "Zero or ambiguous matches raise with a rendered diagnosis.",
                     {"type": "object", "properties": {
                         "path": {"type": "string",
                                  "description": "File path inside the workspace"},
@@ -181,7 +182,10 @@ def _apply_patch_spec(workspace: Workspace) -> ToolSpec:
                     "per file apply in order and multiple files are allowed. "
                     "An empty SEARCH section creates a new file with the "
                     "REPLACE text as content. Every SEARCH text must match "
-                    "exactly once or nothing is written.",
+                    "uniquely (exact first, tolerant fallbacks) or nothing "
+                    "is written. SEARCH/REPLACE text cannot contain "
+                    "merge-conflict marker lines ('<<<<<<<', '=======', "
+                    "'>>>>>>>') - use edit_file for those edits.",
                     {"type": "object", "properties": {
                         "patch": {"type": "string",
                                   "description": "The full patch text"}},
