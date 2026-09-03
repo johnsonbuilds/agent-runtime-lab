@@ -135,7 +135,11 @@ class LocalWorkspace:
     def _read_file(self, display_path: str, target: Path, offset: int,
                    limit: int | None) -> dict[str, Any]:
         try:
-            text = target.read_text(encoding="utf-8")
+            # bytes -> str instead of read_text: read_text applies universal
+            # newlines (\r\n -> \n), so an edit round-trip would silently
+            # rewrite every line ending in the file.  Normalization belongs
+            # to comparison logic, never to the storage path.
+            text = target.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             return {"path": display_path, **_structured_error(exc)}
         return {"path": display_path, **paginate_lines(text, offset, limit)}
@@ -148,7 +152,8 @@ class LocalWorkspace:
                     content: str) -> dict[str, Any]:
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            with target.open("w", encoding="utf-8", newline="") as f:
+                f.write(content)  # newline='' keeps \r\n exactly as given
         except OSError as exc:
             return {"path": display_path, **_structured_error(exc)}
         return {"path": display_path, "bytes_written": len(content.encode("utf-8"))}
