@@ -175,20 +175,30 @@ def _edit_file_spec(workspace: Workspace) -> ToolSpec:
 
 def _apply_patch_spec(workspace: Workspace) -> ToolSpec:
     return ToolSpec("apply_patch",
-                    "Apply several precise edits in one all-or-nothing "
-                    "patch. Format per edit: a line with the file path, then "
-                    "'<<<<<<< SEARCH', the exact original text, '=======', "
-                    "the replacement text, '>>>>>>> REPLACE'. Multiple edits "
-                    "per file apply in order and multiple files are allowed. "
-                    "An empty SEARCH section creates a new file with the "
-                    "REPLACE text as content. Every SEARCH text must match "
-                    "uniquely (exact first, tolerant fallbacks) or nothing "
-                    "is written. SEARCH/REPLACE text cannot contain "
-                    "merge-conflict marker lines ('<<<<<<<', '=======', "
-                    "'>>>>>>>') - use edit_file for those edits.",
+                    "Apply precise edits in one all-or-nothing patch. "
+                    "The `patch` parameter is a SINGLE string. Each edit "
+                    "block inside it has this exact structure (line by line):\n"
+                    "\n"
+                    "  <file_path>\n"
+                    "  <<<<<<< SEARCH\n"
+                    "  <exact original text from the file>\n"
+                    "  =======\n"
+                    "  <replacement text>\n"
+                    "  >>>>>>> REPLACE\n"
+                    "\n"
+                    "Multiple blocks for the same file apply in order. "
+                    "Multiple files are allowed in one patch. An empty "
+                    "SEARCH section (just <<<<<<< SEARCH followed by "
+                    "======= immediately) creates a new file. Every SEARCH "
+                    "text must match the file exactly once or nothing is "
+                    "written. SEARCH/REPLACE text cannot contain conflict "
+                    "marker lines ('<<<<<<<', '=======', '>>>>>>>') - use "
+                    "edit_file for those edits.",
                     {"type": "object", "properties": {
                         "patch": {"type": "string",
-                                  "description": "The full patch text"}},
+                                  "description": "The full patch string "
+                                                 "containing one or more "
+                                                 "SEARCH/REPLACE blocks"}},
                      "required": ["patch"]},
                     partial(apply_patch, workspace=workspace))
 
