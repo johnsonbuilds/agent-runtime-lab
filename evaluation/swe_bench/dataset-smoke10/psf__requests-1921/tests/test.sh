@@ -13,7 +13,7 @@ git apply -v /tests/test_patch.diff > /dev/null 2>&1 || git apply /tests/test_pa
 
 set -o pipefail
 set -x
-python -m pytest --no-header -rA --tb=no -p no:cacheprovider test_requests.py 2>&1 | tee "$LOG"
+python -m pytest -rA --tb=no -p no:cacheprovider test_requests.py 2>&1 | tee "$LOG"
 runner_exit=$?
 set +x
 RUNNER_EXIT=$runner_exit
